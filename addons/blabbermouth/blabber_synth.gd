@@ -1,5 +1,5 @@
 class_name BlabberSynth
-extends RefCounted
+extends BlabberEngine
 ## Real-time formant voice synthesizer.
 ##
 ## Sound path: glottal pulse (the buzz) + breath noise -> 4 formant
@@ -14,15 +14,6 @@ const FRIC_GAIN := 0.55
 const ASP_GAIN := 0.35
 const PRESENCE := 0.4
 
-var sample_rate := 22050.0
-var segments: Array = []
-var voice: BlabberVoice
-## True once every segment has been rendered.
-var finished := false
-## Sample position where the last segment ended (valid once finished).
-var end_sample := 0
-## [sample_pos, segment_index] for each segment start, in order.
-var events: Array[Vector2i] = []
 ## Mouth openness (0..1) for each BLOCK of rendered audio.
 var mouth_track := PackedFloat32Array()
 
@@ -138,15 +129,6 @@ func render(frames: int) -> PackedFloat32Array:
 			out[i + k] = _buf[_buf_pos + k]
 		i += take
 		_buf_pos += take
-	return out
-
-
-## Renders the whole line at once (for baking to a file).
-func render_all() -> PackedFloat32Array:
-	var out := PackedFloat32Array()
-	while not finished:
-		out.append_array(render(4096))
-	out.resize(end_sample)
 	return out
 
 

@@ -1,10 +1,10 @@
 [gd_resource type="Resource" script_class="BlabberVoice" load_steps=2 format=3]
 
-[ext_resource type="Script" path="res://addons/blabbermouth/blabber_voice.gd" id="1_vaw1c"]
+[ext_resource type="Script" path="res://addons/blabbermouth/blabber_voice.gd" id="1_jnnot"]
 
 [resource]
 resource_name = "man"
-script = ExtResource("1_vaw1c")
+script = ExtResource("1_jnnot")
 pitch = 112.0
 intonation = 4.0
 pitch_variation = 1.0
@@ -31,5 +31,7 @@ onset_chance = 0.85
 coda_chance = 0.2
 language_seed = 0
 speak_names = false
+sample_melody = 0.8
+sample_variety = 3
 ring_mod_hz = 0.0
 ring_mod_mix = 0.0

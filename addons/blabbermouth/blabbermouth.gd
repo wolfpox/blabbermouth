@@ -45,7 +45,7 @@ var player: Node
 ## The label in use. Can be set from code instead of label_path.
 var label: Node
 
-var _synth: BlabberSynth
+var _synth: BlabberEngine
 var _playback: AudioStreamGeneratorPlayback
 var _visible_total := 0
 var _event_i := 0
@@ -76,7 +76,7 @@ func speak(text: String, override_voice: BlabberVoice = null) -> void:
 	if v == null:
 		v = BlabberVoice.preset("man")
 	var plan := BlabberParser.build(text, v)
-	_synth = BlabberSynth.new(plan.segments, v, sample_rate)
+	_synth = BlabberEngine.create(plan.segments, v, sample_rate)
 	_visible_total = plan.visible
 	_event_i = 0
 	_revealed = 0
@@ -127,7 +127,7 @@ static func strip_tags(text: String) -> String:
 ## Renders a line to an AudioStreamWAV, e.g. to cache lines or save with save_to_wav().
 static func bake(text: String, p_voice: BlabberVoice, p_sample_rate: int = 22050) -> AudioStreamWAV:
 	var plan := BlabberParser.build(text, p_voice)
-	var synth := BlabberSynth.new(plan.segments, p_voice, p_sample_rate)
+	var synth := BlabberEngine.create(plan.segments, p_voice, p_sample_rate)
 	var samples := synth.render_all()
 	var data := PackedByteArray()
 	data.resize(samples.size() * 2)

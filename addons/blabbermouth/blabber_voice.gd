@@ -85,6 +85,15 @@ const EMOTIONS := {
 ## In gibberish mode, speak capitalized names phonetically so they stay recognizable.
 @export var speak_names := false
 
+@export_group("Samples")
+## A recorded voice. When set, lines are spoken with these syllables instead of the synth.
+## In sample mode, pitch is the target pitch and formant_scale is the size change (1.0 = as recorded).
+@export var sample_bank: BlabberSampleBank
+## 1 = always follow the sentence melody, 0 = keep the recording's own pitch.
+@export_range(0.0, 1.0, 0.01) var sample_melody := 0.8
+## How many similar-sounding syllables to choose between. Higher = more varied.
+@export_range(1, 8, 1) var sample_variety := 3
+
 @export_group("Effects")
 ## Ring modulation for robots. 0 = off.
 @export_range(0.0, 400.0, 1.0, "suffix:Hz") var ring_mod_hz := 0.0

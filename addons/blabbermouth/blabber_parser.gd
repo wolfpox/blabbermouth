@@ -391,7 +391,7 @@ static func _dyn(voice: BlabberVoice, emo: Dictionary) -> Dictionary:
 static func _seg(d: float, f: Array, p0: float, p1: float, amp: float, rev: int, dyn: Dictionary) -> Dictionary:
 	var s := dyn.duplicate()
 	s.merge({"d": d, "f": f, "v": 0.0, "asp": 0.0, "fr": 0.0, "nf": 3000.0, "nq": 1.0,
-		"p0": p0, "p1": p1, "a": amp, "m": 0.0, "rev": rev, "syl": false, "word": "", "fast": false}, true)
+		"p0": p0, "p1": p1, "a": amp, "m": 0.0, "rev": rev, "syl": false, "word": "", "fast": false, "ph": ""}, true)
 	return s
 
 
@@ -401,7 +401,7 @@ static func _silence(d: float, rev: int, segs: Array) -> Dictionary:
 	var prev: Dictionary = segs[-1]
 	var s := prev.duplicate()
 	s.merge({"d": d, "v": 0.0, "asp": 0.0, "fr": 0.0, "m": 0.0, "rev": rev, "syl": false,
-		"word": "", "fast": false, "p0": prev.p1, "p1": prev.p1}, true)
+		"word": "", "fast": false, "p0": prev.p1, "p1": prev.p1, "ph": ""}, true)
 	return s
 
 
@@ -537,6 +537,7 @@ static func _emit_word(w: Dictionary, voice: BlabberVoice, rng: RandomNumberGene
 		var p0: float = pd.p0
 		var p1: float = pd.p1
 		var next_vowel: bool = j + 1 < phones.size() and P.is_vowel_phone(phones[j + 1].ph)
+		var seg_count := segs.size()
 		match tbl.k:
 			Kind.VOWEL:
 				var sg := _seg(0.085 * pd.dm / speed, tbl.f, p0, p1, a, rev, dyn)
@@ -572,6 +573,8 @@ static func _emit_word(w: Dictionary, voice: BlabberVoice, rng: RandomNumberGene
 				var sg := _seg(0.055 / speed, pd.ctx_f, p0, p1, a, rev, dyn)
 				sg.asp = 0.5 * art + 0.1; sg.v = (1.0 - art) * 0.5; sg.m = 0.5
 				_push(segs, sg)
+		for q in range(seg_count, segs.size()):
+			segs[q].ph = pd.ph
 	if segs.size() > first_seg:
 		segs[first_seg].word = text
 	if next_is_word and voice.word_gap > 0.0:

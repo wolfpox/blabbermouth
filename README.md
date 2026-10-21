@@ -5,7 +5,8 @@ character "speech" like Animal Crossing, Undertale or The Sims, from squeaky
 critters to growling monsters, without any audio files.
 
 Everything is generated in real time by a small formant synthesizer written in
-GDScript. One voice costs about 3–6% of one CPU core.
+GDScript. One voice costs about 3–6% of one CPU core. You can also record your
+own voice (or any sound) and it will talk with that instead.
 
 ## Quick start
 
@@ -76,6 +77,66 @@ Or tweak it in the demo and press **Save voice .tres**.
 Any language works. Non-Latin text (Japanese, Russian and others) is spoken as
 gibberish with a matching rhythm.
 
+## Your own voice (samples)
+
+Record yourself, a friend, your cat, or load any WAV, OGG or MP3, and the
+engine speaks with those sounds instead of the synth.
+
+In the demo, open the **My voice** tab:
+
+1. Press **Record** and read the nonsense line out loud (or make any noises),
+   or press **Load file…**, or drop a file on the window.
+2. The recording is cleaned up (silence trimmed, room noise gated, volume
+   evened out) and cut into syllables, shown as colored pieces. Cool
+   colors are bright "ee" sounds and warm colors are dark "oo" sounds; grey
+   pieces have no clear pitch.
+3. Tap a piece to hear it. Turn on **Tap removes** to drop coughs and clicks.
+4. Pick a **Character** (as recorded, tiny critter, kid, giant…), then Speak.
+   **Save voice** writes a `.res` with the recording inside.
+
+How it works:
+
+- **Matching sounds.** Each syllable in the text picks a recorded piece with a
+  similar brightness, so "ee" words use "ee"-like pieces. The same word always
+  picks the same pieces.
+- **Pitch and size, separately.** Pieces are re-pitched to follow the
+  sentence melody using PSOLA (pitch-synchronous overlap-add). A recording can
+  be made higher or lower, or smaller or bigger, without the chipmunk effect.
+  `pitch` is the target pitch and `formant_scale` is the size change
+  (1.0 = as recorded).
+- **Delivery still applies.** Speed, intonation, pauses, emotions and tags all
+  work. Growl, rasp and whisper are synth-only for now.
+
+In code:
+
+```gdscript
+var importer := BlabberAudioImport.new()
+add_child(importer)
+var result: Dictionary = await importer.load_file("res://voices/me.wav")
+var voice := BlabberVoice.preset("man")
+voice.sample_bank = BlabberSampleBank.from_samples(result.samples, result.rate)
+voice.pitch = voice.sample_bank.reference_pitch()
+voice.formant_scale = 1.0
+$Blabbermouth.speak("Hey! Over here!", voice)
+```
+
+`BlabberRecorder` records from the microphone (`start()`, then `stop()` or the
+`stopped` signal), and its result goes into `from_samples()` the same way.
+
+Notes:
+
+- **Microphone:** turn on *Project Settings > Audio > Driver > Enable Input*
+  (this project already has it on). On Android, tick the `RECORD_AUDIO`
+  permission in the export preset. On iOS, add a microphone usage
+  description.
+- **File types:** WAV loads instantly. On Godot 4.3, OGG and MP3 take as long
+  as the clip to decode, because they are played silently through a capture
+  bus. Newer Godot versions decode them instantly. Phone voice-memo apps
+  often save `.m4a`, which Godot can't read, so record in the app instead or
+  convert the file first.
+- Recordings are capped at 30 seconds. Use 5–15 seconds of varied syllables
+  for the best results.
+
 ## Inline tags
 
 | Tag | Effect |
@@ -134,7 +195,9 @@ wav.save_to_wav("user://welcome.wav")
    consonant hiss and bursts. Growl, ring modulation and a soft limiter come
    last. All settings glide between sounds, so speech flows instead of
    clicking.
-3. **Node** (`blabbermouth.gd`): streams audio through an
+3. **Sampler** (`blabber_sampler.gd`): the alternative to the synth when a
+   voice has a recording. It uses the same timeline, signals and lip-sync.
+4. **Node** (`blabbermouth.gd`): streams audio through an
    `AudioStreamGenerator` and fires signals at the moment each part is heard.
 
 ## Tools
@@ -146,4 +209,5 @@ godot --headless --path . -s tools/test_render.gd -- /tmp/out   # render every p
 godot --headless --path . -s tools/test_node.gd                 # check the node's signals
 godot --headless --path . -s tools/make_showcase.gd -- demo.wav # one clip of every voice
 godot --headless --path . -s tools/make_presets.gd              # regenerate voices/*.tres
+godot --headless --path . -s tools/test_samples.gd -- /tmp/out a.wav b.ogg  # import, slice and speak recordings
 ```

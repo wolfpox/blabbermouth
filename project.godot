@@ -10,6 +10,10 @@ run/main_scene="res://demo/demo.tscn"
 config/features=PackedStringArray("4.3")
 config/icon="res://addons/blabbermouth/icon.svg"
 
+[audio]
+
+driver/enable_input=true
+
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/blabbermouth/plugin.cfg")

@@ -1,10 +1,10 @@
 [gd_resource type="Resource" script_class="BlabberVoice" load_steps=2 format=3]
 
-[ext_resource type="Script" path="res://addons/blabbermouth/blabber_voice.gd" id="1_shhvq"]
+[ext_resource type="Script" path="res://addons/blabbermouth/blabber_voice.gd" id="1_4frw3"]
 
 [resource]
 resource_name = "critter"
-script = ExtResource("1_shhvq")
+script = ExtResource("1_4frw3")
 pitch = 620.0
 intonation = 7.0
 pitch_variation = 3.0
@@ -31,5 +31,7 @@ onset_chance = 0.85
 coda_chance = 0.1
 language_seed = 11
 speak_names = false
+sample_melody = 0.8
+sample_variety = 3
 ring_mod_hz = 0.0
 ring_mod_mix = 0.0

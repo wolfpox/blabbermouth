@@ -47,6 +47,9 @@ var speech: RichTextLabel
 var status: Label
 var face: Face
 var playing_all := false
+var studio: SampleStudio
+
+const SampleStudio := preload("res://demo/sample_studio.gd")
 
 
 class Face extends Control:
@@ -98,16 +101,28 @@ func _ready() -> void:
 	root.add_theme_constant_override("separation", 16)
 	margin.add_child(root)
 
-	# Left: voice controls.
+	# Left: tabs for the synth voice and the sample (recorded) voice.
+	var tabs := TabContainer.new()
+	tabs.custom_minimum_size = Vector2(400, 0)
+	root.add_child(tabs)
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(380, 0)
+	scroll.name = "Voice"
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	root.add_child(scroll)
+	tabs.add_child(scroll)
+	var sample_scroll := ScrollContainer.new()
+	sample_scroll.name = "My voice"
+	sample_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	tabs.add_child(sample_scroll)
+	studio = SampleStudio.new()
+	studio.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sample_scroll.add_child(studio)
+	studio.changed.connect(_apply_samples)
 	var panel := VBoxContainer.new()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(panel)
 
 	panel.add_child(_title("Voice"))
+	panel.add_child(_hint("With \"My voice\" on, Pitch and Formant Scale change your recording, and the rest sets the delivery."))
 	preset_opt = OptionButton.new()
 	for n in BlabberVoice.PRESET_NAMES:
 		preset_opt.add_item(n.capitalize())
@@ -150,7 +165,7 @@ func _ready() -> void:
 		panel.add_child(row)
 
 	var save_row := HBoxContainer.new()
-	save_row.add_child(_button("Save voice .tres", _save_voice))
+	save_row.add_child(_button("Save voice", _save_voice))
 	save_row.add_child(_button("Bake line .wav", _bake_line))
 	panel.add_child(save_row)
 	status = Label.new()
@@ -223,15 +238,34 @@ func _fmt(v: float) -> String:
 	return str(snappedf(v, 0.001))
 
 
+func _hint(t: String) -> Label:
+	var l := Label.new()
+	l.text = t
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.add_theme_font_size_override("font_size", 13)
+	l.modulate = Color(1, 1, 1, 0.5)
+	return l
+
+
+func _apply_samples() -> void:
+	studio.apply_to(voice)
+	_refresh_sliders()
+
+
 func _load_preset(n: String) -> void:
 	preset_name = n
 	voice = BlabberVoice.preset(n)
+	studio.apply_to(voice)
+	_refresh_sliders()
+	face.body_color = PRESET_COLORS.get(n, Color.WHITE)
+
+
+func _refresh_sliders() -> void:
 	for prop in sliders:
 		sliders[prop].set_value_no_signal(voice.get(prop))
 		value_labels[prop].text = _fmt(voice.get(prop))
 	mode_check.set_pressed_no_signal(voice.mode == BlabberVoice.Mode.PHONETIC)
 	names_check.set_pressed_no_signal(voice.speak_names)
-	face.body_color = PRESET_COLORS.get(n, Color.WHITE)
 
 
 func _speak() -> void:
@@ -258,7 +292,8 @@ func _play_all() -> void:
 
 
 func _save_voice() -> void:
-	var path := "user://%s_custom.tres" % preset_name
+	# Voices with a recording are saved as binary .res, which keeps them small.
+	var path := ("user://%s_custom.res" if voice.sample_bank else "user://%s_custom.tres") % preset_name
 	var err := ResourceSaver.save(voice, path)
 	status.text = ("Saved " + ProjectSettings.globalize_path(path)) if err == OK else "Save failed (%d)" % err
 
