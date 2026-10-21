@@ -1,2 +1,149 @@
-# blabbermouth-
-Text to mumble engine
+# Blabbermouth
+
+A text-to-mumble voice engine for Godot 4.3+. It turns dialogue text into
+character "speech" like Animal Crossing, Undertale or The Sims, from squeaky
+critters to growling monsters, without any audio files.
+
+Everything is generated in real time by a small formant synthesizer written in
+GDScript. One voice costs about 3–6% of one CPU core.
+
+## Quick start
+
+1. Copy `addons/blabbermouth` into your project.
+2. Add a `Blabbermouth` node to a character.
+3. In the inspector, set **Voice** to a preset from `addons/blabbermouth/voices/`
+   (or make a new `BlabberVoice`), and optionally set **Label Path** to your
+   dialogue `Label` / `RichTextLabel`.
+4. Call it:
+
+```gdscript
+$Blabbermouth.speak("Hello there, traveler! [emote=happy]Lovely day, isn't it?")
+await $Blabbermouth.finished
+```
+
+The label is revealed in sync with the voice (a typewriter effect), so you don't
+need a separate timer.
+
+To try it, open this repo as a Godot project and run it. The demo is a voice
+designer with sliders, sample lines and a talking face.
+
+## Voices
+
+| Preset  | Pitch | Throat size | Character |
+|---------|-------|-------------|-----------|
+| critter | 620 Hz | 1.9  | Fast, chirpy, squeaky |
+| child   | 290 Hz | 1.32 | Bright and bouncy |
+| woman   | 215 Hz | 1.17 | Warm, slightly breathy |
+| man     | 112 Hz | 1.0  | Steady |
+| elder   | 135 Hz | 1.02 | Slow, raspy, shaky |
+| goblin  | 260 Hz | 1.45 | Sharp, raspy, quick |
+| monster | 58 Hz  | 0.68 | Deep growl |
+| robot   | 100 Hz | 1.05 | Flat, metallic |
+
+The two settings that matter most:
+
+- **pitch**: how fast the vocal cords buzz.
+- **formant_scale**: how big the throat is. 1.0 is an adult man; higher is
+  smaller (woman 1.17, child 1.3, tiny creature 2.0); lower is a giant.
+
+Changing them separately is what makes a voice sound big or small instead
+of a sped-up recording. Other settings: intonation, pitch variation, speed,
+articulation (hum ↔ crisp consonants), tenseness, breathiness, roughness
+(rasp), growl, jitter, shimmer, vibrato, voicing (0 = whisper) and ring
+modulation.
+
+Make a voice in code:
+
+```gdscript
+var v := BlabberVoice.preset("goblin")
+v.pitch = 300.0
+v.growl = 0.4
+$Blabbermouth.speak("Mine! All mine!", v)
+```
+
+Or tweak it in the demo and press **Save voice .tres**.
+
+## Gibberish vs phonetic
+
+- **Gibberish** (default): each word becomes made-up syllables built from the
+  voice's `onsets`, `vowels` and `codas`. The same word always sounds the same,
+  so players start to "learn" words. Change `language_seed` to give a species
+  its own language. Turn on `speak_names` to keep capitalized names
+  recognizable.
+- **Phonetic**: follows the letters with simple English rules, so it sounds
+  like mumbled speech that matches the text.
+
+Any language works. Non-Latin text (Japanese, Russian and others) is spoken as
+gibberish with a matching rhythm.
+
+## Inline tags
+
+| Tag | Effect |
+|-----|--------|
+| `[pause=0.5]` | Silence, in seconds |
+| `[speed=1.5]…[/speed]` | Faster or slower |
+| `[pitch=1.2]…[/pitch]` | Higher or lower |
+| `[volume=0.5]…[/volume]` | Louder or quieter |
+| `[emote=angry]…[/emote]` | happy, excited, angry, sad, scared, whisper, shout |
+| `[whisper]…[/whisper]`, `[shout]…[/shout]` | Shortcuts |
+| `[reset]` | Back to normal |
+
+Other tags, like BBCode `[b]`, are left alone and stay silent, so the same
+string can go straight into a `RichTextLabel` with BBCode enabled.
+For a plain `Label`, all tags are removed automatically.
+
+Punctuation shapes delivery: commas and full stops pause, `...` pauses longer,
+`?` rises at the end, `!` adds energy, and words in CAPS are stressed.
+
+## Signals and lip-sync
+
+| Signal | Use |
+|--------|-----|
+| `started(text)` | A line began |
+| `syllable_spoken(char_index)` | Bounce a portrait, play a particle |
+| `word_spoken(word)` | Subtitles, word highlighting |
+| `characters_revealed(count)` | Custom typewriter (matches `visible_characters`) |
+| `mouth_moved(openness)` | Lip-sync, 0 = closed and 1 = wide open |
+| `finished` | The line ended or was skipped |
+
+`mouth_openness` is also available as a property. Methods: `speak()`, `stop()`,
+`skip()` (reveal everything and finish), `is_speaking()`.
+
+For positional audio, point **Player Path** at an `AudioStreamPlayer2D` or
+`AudioStreamPlayer3D`. Use the **Bus** setting to add reverb or other effects.
+
+## Baking
+
+To pre-render lines (for mobile, or to cache common barks):
+
+```gdscript
+var wav := Blabbermouth.bake("Welcome!", preload("res://addons/blabbermouth/voices/woman.tres"))
+$AudioStreamPlayer.stream = wav
+wav.save_to_wav("user://welcome.wav")
+```
+
+## How it works
+
+1. **Parser** (`blabber_parser.gd`): reads the tags, splits the text into
+   sentences and words, turns each word into sounds (phonetic or gibberish),
+   then adds melody (pitch falls over a sentence and rises on questions), word
+   stress, random wobble and timing.
+2. **Synth** (`blabber_synth.gd`): a glottal pulse (the buzz), with jitter,
+   shimmer and alternating-cycle rasp, plus breath noise, runs through four
+   resonators that shape it into vowels. Two band-pass filters on noise make
+   consonant hiss and bursts. Growl, ring modulation and a soft limiter come
+   last. All settings glide between sounds, so speech flows instead of
+   clicking.
+3. **Node** (`blabbermouth.gd`): streams audio through an
+   `AudioStreamGenerator` and fires signals at the moment each part is heard.
+
+## Tools
+
+Run headless from the project folder:
+
+```sh
+godot --headless --path . -s tools/test_render.gd -- /tmp/out   # render every preset, print timing
+godot --headless --path . -s tools/test_node.gd                 # check the node's signals
+godot --headless --path . -s tools/make_showcase.gd -- demo.wav # one clip of every voice
+godot --headless --path . -s tools/make_presets.gd              # regenerate voices/*.tres
+```

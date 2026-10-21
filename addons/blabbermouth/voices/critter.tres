@@ -1,0 +1,35 @@
+[gd_resource type="Resource" script_class="BlabberVoice" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/blabbermouth/blabber_voice.gd" id="1_shhvq"]
+
+[resource]
+resource_name = "critter"
+script = ExtResource("1_shhvq")
+pitch = 620.0
+intonation = 7.0
+pitch_variation = 3.0
+vibrato_depth = 0.0
+vibrato_rate = 5.5
+formant_scale = 1.9
+tenseness = 0.65
+breathiness = 0.05
+roughness = 0.0
+growl = 0.0
+jitter = 0.01
+shimmer = 0.05
+voicing = 1.0
+speed = 1.35
+articulation = 0.5
+word_gap = 0.04
+pause_scale = 1.0
+volume = 0.8
+mode = 0
+onsets = "p t k m w b n p"
+vowels = "i i e a u i"
+codas = "p k"
+onset_chance = 0.85
+coda_chance = 0.1
+language_seed = 11
+speak_names = false
+ring_mod_hz = 0.0
+ring_mod_mix = 0.0

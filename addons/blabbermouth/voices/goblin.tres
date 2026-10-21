@@ -1,0 +1,35 @@
+[gd_resource type="Resource" script_class="BlabberVoice" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/blabbermouth/blabber_voice.gd" id="1_3ahxx"]
+
+[resource]
+resource_name = "goblin"
+script = ExtResource("1_3ahxx")
+pitch = 260.0
+intonation = 6.0
+pitch_variation = 2.5
+vibrato_depth = 0.0
+vibrato_rate = 5.5
+formant_scale = 1.45
+tenseness = 0.75
+breathiness = 0.1
+roughness = 0.35
+growl = 0.2
+jitter = 0.01
+shimmer = 0.05
+voicing = 1.0
+speed = 1.3
+articulation = 0.85
+word_gap = 0.03
+pause_scale = 1.0
+volume = 0.8
+mode = 0
+onsets = "g k sh n t z r gr sk"
+vowels = "i e a ih"
+codas = "k sh t z"
+onset_chance = 0.85
+coda_chance = 0.4
+language_seed = 23
+speak_names = false
+ring_mod_hz = 0.0
+ring_mod_mix = 0.0

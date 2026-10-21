@@ -1,0 +1,35 @@
+[gd_resource type="Resource" script_class="BlabberVoice" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/blabbermouth/blabber_voice.gd" id="1_xb2vu"]
+
+[resource]
+resource_name = "elder"
+script = ExtResource("1_xb2vu")
+pitch = 135.0
+intonation = 3.0
+pitch_variation = 1.0
+vibrato_depth = 0.35
+vibrato_rate = 5.5
+formant_scale = 1.02
+tenseness = 0.35
+breathiness = 0.3
+roughness = 0.25
+growl = 0.0
+jitter = 0.04
+shimmer = 0.15
+voicing = 1.0
+speed = 0.8
+articulation = 0.6
+word_gap = 0.03
+pause_scale = 1.0
+volume = 0.8
+mode = 0
+onsets = "b d g k m n l r s t p w h y v z f sh"
+vowels = "a e i o u a e"
+codas = "n m s k t r l"
+onset_chance = 0.85
+coda_chance = 0.2
+language_seed = 0
+speak_names = false
+ring_mod_hz = 0.0
+ring_mod_mix = 0.0

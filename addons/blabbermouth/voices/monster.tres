@@ -1,0 +1,35 @@
+[gd_resource type="Resource" script_class="BlabberVoice" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/blabbermouth/blabber_voice.gd" id="1_5konk"]
+
+[resource]
+resource_name = "monster"
+script = ExtResource("1_5konk")
+pitch = 58.0
+intonation = 3.0
+pitch_variation = 1.5
+vibrato_depth = 0.0
+vibrato_rate = 5.5
+formant_scale = 0.68
+tenseness = 0.8
+breathiness = 0.1
+roughness = 0.6
+growl = 0.7
+jitter = 0.01
+shimmer = 0.05
+voicing = 1.0
+speed = 0.8
+articulation = 0.5
+word_gap = 0.03
+pause_scale = 1.0
+volume = 0.9
+mode = 0
+onsets = "g gr b d k kr r m z"
+vowels = "o u a uh o"
+codas = "g k r m"
+onset_chance = 0.85
+coda_chance = 0.35
+language_seed = 31
+speak_names = false
+ring_mod_hz = 0.0
+ring_mod_mix = 0.0
