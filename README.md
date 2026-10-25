@@ -13,7 +13,7 @@ own voice (or any sound) and it will talk with that instead.
 The demo runs on the web, phones included: speak with the built-in voices,
 or record your voice (or load a voice memo) and make it talk.
 
-**Link:** https://wolfpox.github.io/blabbermouth-/ (once Pages is turned on, see below).
+**Link:** https://wolfpox.github.io/blabbermouth/ (once Pages is turned on, see below).
 
 ### Publishing the web version (one-time setup)
 
