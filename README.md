@@ -8,6 +8,31 @@ Everything is generated in real time by a small formant synthesizer written in
 GDScript. One voice costs about 3–6% of one CPU core. You can also record your
 own voice (or any sound) and it will talk with that instead.
 
+## Try it in your browser
+
+The demo runs on the web, phones included: speak with the built-in voices,
+or record your voice (or load a voice memo) and make it talk.
+
+**Link:** https://wolfpox.github.io/blabbermouth-/ (once Pages is turned on, see below).
+
+### Publishing the web version (one-time setup)
+
+1. Merge into `main`.
+2. In the repo on GitHub, open **Settings → Pages** and set **Source** to
+   **GitHub Actions**.
+3. The **Web build** workflow runs on every push and publishes `main` to the
+   link above. Share that link with anyone.
+
+The build is single-threaded, so it works on plain static hosting with no
+special headers. In the browser, the microphone and file loading use the
+browser's own audio features, so `.m4a` voice memos from phones load too.
+The page must be served over `https` for the microphone, which GitHub Pages
+does.
+
+To build locally: install Godot 4.3 and its export templates, then run
+`godot --headless --path . --export-release "Web" build/web/index.html`
+and serve `build/web` with any static web server.
+
 ## Quick start
 
 1. Copy `addons/blabbermouth` into your project.
@@ -125,6 +150,13 @@ $Blabbermouth.speak("Hey! Over here!", voice)
 
 Notes:
 
+- **Web exports:** `BlabberWeb` handles recording and file picking in the
+  browser. `BlabberRecorder` uses it automatically. For files, call
+  `BlabberWeb.place_file_input(your_button)` every frame. It lays an
+  invisible file input over your button, because browsers only open a file
+  picker from a real tap. Then watch `BlabberWeb.state()`. Set
+  `audio/general/default_playback_type.web` to *Stream* (this project does),
+  so voices play through Godot's mixer.
 - **Microphone:** turn on *Project Settings > Audio > Driver > Enable Input*
   (this project already has it on). On Android, tick the `RECORD_AUDIO`
   permission in the export preset. On iOS, add a microphone usage

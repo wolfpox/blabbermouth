@@ -45,6 +45,31 @@ func load_file(path: String) -> Dictionary:
 	return _fail("Unsupported file type .%s. Use WAV, OGG or MP3." % ext)
 
 
+## Web only: opens the browser's file picker and decodes the chosen file
+## with the browser (so .m4a voice memos work too). Some browsers refuse to
+## open a picker from code; BlabberWeb.place_file_input() is more reliable.
+## Returns {ok, samples, rate, error, name}; ok is false with an empty error
+## if the user cancelled.
+func pick_file_web() -> Dictionary:
+	if not BlabberWeb.available():
+		return _fail("pick_file_web() only works in a web export.")
+	BlabberWeb.pick_file()
+	var st := "picking"
+	while st == "picking" or st == "decoding":
+		await get_tree().process_frame
+		st = BlabberWeb.state()
+		if st == "decoding":
+			progress.emit(0.5)
+	if st == "done":
+		var samples := BlabberWeb.take_file()
+		progress.emit(1.0)
+		return {"ok": not samples.is_empty(), "samples": samples, "rate": BlabberWeb.rate(), "error": "",
+			"name": str(JavaScriptBridge.eval("window.BlabberWeb.name", true))}
+	if st == "error":
+		return _fail(BlabberWeb.error())
+	return _fail("")
+
+
 ## Decodes any AudioStream to mono samples.
 func decode_stream(stream: AudioStream) -> Dictionary:
 	if stream is AudioStreamWAV:

@@ -44,6 +44,7 @@ var remove_check: CheckButton
 var sensitivity_slider: HSlider
 var info: Label
 var file_dialog: FileDialog
+var load_button: Button
 var _prompt_i := 0
 var _busy := false
 
@@ -62,14 +63,14 @@ func _ready() -> void:
 	prompt_label = _label(PROMPTS[0], 20, 1.0)
 	prompt_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	prow.add_child(prompt_label)
-	prow.add_child(_button("↻", _next_prompt))
+	prow.add_child(_button("New line", _next_prompt))
 	add_child(prow)
 
 	var rrow := HBoxContainer.new()
-	record_button = _button("● Record", _toggle_record)
+	record_button = _button("Record", _toggle_record)
 	record_button.custom_minimum_size = Vector2(150, 44)
 	rrow.add_child(record_button)
-	var load_button := _button("Load file…", _open_file)
+	load_button = _button("Load file…", _open_file)
 	load_button.custom_minimum_size = Vector2(0, 44)
 	rrow.add_child(load_button)
 	add_child(rrow)
@@ -78,7 +79,10 @@ func _ready() -> void:
 	level_bar.show_percentage = false
 	level_bar.custom_minimum_size = Vector2(0, 6)
 	add_child(level_bar)
-	add_child(_label("Tip: you can also drop a WAV, OGG or MP3 file on the window.", 13, 0.5))
+	if BlabberWeb.available():
+		add_child(_label("Load file works with voice memos and most audio files.", 13, 0.5))
+	else:
+		add_child(_label("Tip: you can also drop a WAV, OGG or MP3 file on the window.", 13, 0.5))
 
 	wave = WaveView.new()
 	wave.custom_minimum_size = Vector2(0, 110)
@@ -138,13 +142,16 @@ func _ready() -> void:
 	recorder.level_changed.connect(func(l: float) -> void: level_bar.value = l)
 	recorder.stopped.connect(_finish_recording)
 	get_window().files_dropped.connect(func(files: PackedStringArray) -> void: load_path(files[0]))
-	set_process(false)
+	# On the web, _process also keeps the file input lined up with its button.
+	set_process(BlabberWeb.available())
 
 
 func _process(_delta: float) -> void:
+	if BlabberWeb.available():
+		_web_file_input()
 	if recorder.recording:
 		wave.append_audio(recorder.samples, 0, recorder.rate)
-		record_button.text = "■ Stop  %.1fs" % recorder.seconds()
+		record_button.text = "Stop  %.1fs" % recorder.seconds()
 
 
 func _toggle_record() -> void:
@@ -164,8 +171,8 @@ func _toggle_record() -> void:
 
 
 func _finish_recording(result: Dictionary) -> void:
-	set_process(false)
-	record_button.text = "● Record"
+	set_process(BlabberWeb.available())
+	record_button.text = "Record"
 	level_bar.value = 0.0
 	if not result.ok:
 		info.text = result.error
@@ -174,6 +181,9 @@ func _finish_recording(result: Dictionary) -> void:
 
 
 func _open_file() -> void:
+	if BlabberWeb.available():
+		_pick_web()
+		return
 	if file_dialog == null:
 		file_dialog = FileDialog.new()
 		file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
@@ -183,6 +193,37 @@ func _open_file() -> void:
 		file_dialog.file_selected.connect(load_path)
 		add_child(file_dialog)
 	file_dialog.popup_centered_ratio(0.7)
+
+
+## Web: an invisible file input sits over the Load button (browsers only open
+## a file picker from a real tap), and the browser decodes the chosen file.
+func _web_file_input() -> void:
+	var clip := Rect2()
+	var p := get_parent()
+	if p is Control:
+		clip = (p as Control).get_global_rect()
+	BlabberWeb.place_file_input(load_button, load_button.is_visible_in_tree() and not recorder.recording and not _busy, clip)
+	match BlabberWeb.state():
+		"decoding":
+			info.text = "Reading %s…" % BlabberWeb.file_name()
+		"done":
+			var samples := BlabberWeb.take_file()
+			_use_audio(samples, BlabberWeb.rate(), BlabberWeb.file_name())
+		"error":
+			info.text = BlabberWeb.error()
+			BlabberWeb.reset()
+
+
+## Web fallback: open the browser's picker from code. It decodes the file itself, so .m4a voice memos work.
+func _pick_web() -> void:
+	if recorder.recording:
+		return
+	info.text = "Choose an audio file…"
+	var result: Dictionary = await importer.pick_file_web()
+	if not result.ok:
+		info.text = result.error if result.error != "" else ""
+		return
+	_use_audio(result.samples, result.rate, result.name)
 
 
 func load_path(path: String) -> void:

@@ -1,0 +1,77 @@
+# Builds the web version with Godot and publishes it to GitHub Pages.
+# Every push builds (so broken exports show up early); only the default
+# branch deploys. One-time setup: Settings > Pages > Source: GitHub Actions.
+name: Web build
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.3"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Godot and web templates
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-web-nothreads
+
+      - name: Download Godot and web templates
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          mkdir -p ~/godot "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          cd ~/godot
+          curl -fsSL -o godot.zip "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip && rm godot.zip
+          mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot
+          # The template bundle is ~1 GB; keep only the web files we need.
+          curl -fsSL -o templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q -j templates.tpz templates/web_nothreads_release.zip templates/web_nothreads_debug.zip templates/version.txt \
+            -d "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          rm templates.tpz
+
+      - name: Export web build
+        run: |
+          set -e
+          mkdir -p build/web
+          # Import first so class names are registered before exporting.
+          timeout 300 ~/godot/godot --headless --path . --import || true
+          ~/godot/godot --headless --path . --export-release "Web" build/web/index.html
+          test -f build/web/index.wasm
+          touch build/web/.nojekyll
+          ls -la build/web
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

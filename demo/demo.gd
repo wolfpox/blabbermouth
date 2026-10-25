@@ -48,6 +48,11 @@ var status: Label
 var face: Face
 var playing_all := false
 var studio: SampleStudio
+var root: BoxContainer
+var tabs: TabContainer
+var right: VBoxContainer
+var help: Label
+var margin: MarginContainer
 
 const SampleStudio := preload("res://demo/sample_studio.gd")
 
@@ -92,17 +97,17 @@ func _ready() -> void:
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 
-	var margin := MarginContainer.new()
+	margin = MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	for side in ["left", "right", "top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + side, 16)
 	add_child(margin)
-	var root := HBoxContainer.new()
-	root.add_theme_constant_override("separation", 16)
+	root = BoxContainer.new()
+	root.add_theme_constant_override("separation", 12)
 	margin.add_child(root)
 
 	# Left: tabs for the synth voice and the sample (recorded) voice.
-	var tabs := TabContainer.new()
+	tabs = TabContainer.new()
 	tabs.custom_minimum_size = Vector2(400, 0)
 	root.add_child(tabs)
 	var scroll := ScrollContainer.new()
@@ -164,9 +169,9 @@ func _ready() -> void:
 		value_labels[prop] = vl
 		panel.add_child(row)
 
-	var save_row := HBoxContainer.new()
-	save_row.add_child(_button("Save voice", _save_voice))
-	save_row.add_child(_button("Bake line .wav", _bake_line))
+	var save_row := HFlowContainer.new()
+	save_row.add_child(_button("Download voice" if BlabberWeb.available() else "Save voice", _save_voice))
+	save_row.add_child(_button("Download line .wav" if BlabberWeb.available() else "Bake line .wav", _bake_line))
 	panel.add_child(save_row)
 	status = Label.new()
 	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -174,7 +179,7 @@ func _ready() -> void:
 	panel.add_child(status)
 
 	# Right: character, speech bubble, input.
-	var right := VBoxContainer.new()
+	right = VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.add_theme_constant_override("separation", 10)
 	root.add_child(right)
@@ -198,14 +203,14 @@ func _ready() -> void:
 	text_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	right.add_child(text_edit)
 
-	var buttons := HBoxContainer.new()
+	var buttons := HFlowContainer.new()
 	buttons.add_child(_button("Speak", _speak))
 	buttons.add_child(_button("Skip", func() -> void: blab.skip()))
 	buttons.add_child(_button("Next sample line", _next_line))
 	buttons.add_child(_button("Play every voice", _play_all))
 	right.add_child(buttons)
 
-	var help := Label.new()
+	help = Label.new()
 	help.text = "Tags: [pause=0.5] [speed=1.5] [pitch=1.2] [volume=0.5] [emote=happy|excited|angry|sad|scared] [whisper] [shout] [reset]"
 	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help.modulate = Color(1, 1, 1, 0.5)
@@ -216,6 +221,8 @@ func _ready() -> void:
 	add_child(blab)
 	blab.mouth_moved.connect(func(o: float) -> void: face.openness = o)
 
+	get_window().size_changed.connect(_layout)
+	_layout()
 	preset_opt.select(BlabberVoice.PRESET_NAMES.find(preset_name))
 	_load_preset(preset_name)
 
@@ -236,6 +243,47 @@ func _button(t: String, cb: Callable) -> Button:
 
 func _fmt(v: float) -> String:
 	return str(snappedf(v, 0.001))
+
+
+## Sharp, readable UI on high-density screens, and a stacked layout on
+## narrow (phone) screens.
+func _layout() -> void:
+	var win := get_window()
+	var scale := DisplayServer.screen_get_scale()
+	if BlabberWeb.available():
+		scale = BlabberWeb.pixel_ratio()
+	elif OS.has_feature("mobile"):
+		scale = maxf(scale, DisplayServer.screen_get_dpi() / 160.0)
+	scale = clampf(scale, 1.0, 3.0)
+	win.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
+	win.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
+	win.content_scale_size = Vector2i(Vector2(win.size) / scale)
+	var width := win.size.x / scale
+	var portrait := width < 760.0
+	root.vertical = portrait
+	var pad := 8 if portrait else 16
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, pad)
+	if portrait:
+		root.move_child(right, 0)
+		tabs.custom_minimum_size = Vector2.ZERO
+		tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		right.size_flags_vertical = Control.SIZE_FILL
+		face.custom_minimum_size = Vector2(0, 120)
+		face.size_flags_vertical = Control.SIZE_FILL
+		speech.custom_minimum_size = Vector2(0, 56)
+		text_edit.custom_minimum_size = Vector2(0, 64)
+		help.visible = false
+	else:
+		root.move_child(tabs, 0)
+		tabs.custom_minimum_size = Vector2(400, 0)
+		tabs.size_flags_vertical = Control.SIZE_FILL
+		right.size_flags_vertical = Control.SIZE_FILL
+		face.custom_minimum_size = Vector2(0, 220)
+		face.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		speech.custom_minimum_size = Vector2(0, 90)
+		text_edit.custom_minimum_size = Vector2(0, 90)
+		help.visible = true
 
 
 func _hint(t: String) -> Label:
@@ -295,10 +343,22 @@ func _save_voice() -> void:
 	# Voices with a recording are saved as binary .res, which keeps them small.
 	var path := ("user://%s_custom.res" if voice.sample_bank else "user://%s_custom.tres") % preset_name
 	var err := ResourceSaver.save(voice, path)
-	status.text = ("Saved " + ProjectSettings.globalize_path(path)) if err == OK else "Save failed (%d)" % err
+	if err != OK:
+		status.text = "Save failed (%s)" % error_string(err)
+	elif BlabberWeb.available():
+		BlabberWeb.download(FileAccess.get_file_as_bytes(path), path.get_file())
+		status.text = "Downloaded %s. Put it in your Godot project and use it as a voice." % path.get_file()
+	else:
+		status.text = "Saved " + ProjectSettings.globalize_path(path)
 
 
 func _bake_line() -> void:
 	var path := "user://%s_line.wav" % preset_name
 	var err := Blabbermouth.bake(text_edit.text, voice).save_to_wav(path)
-	status.text = ("Baked " + ProjectSettings.globalize_path(path)) if err == OK else "Bake failed (%d)" % err
+	if err != OK:
+		status.text = "Bake failed (%s)" % error_string(err)
+	elif BlabberWeb.available():
+		BlabberWeb.download(FileAccess.get_file_as_bytes(path), path.get_file(), "audio/wav")
+		status.text = "Downloaded " + path.get_file()
+	else:
+		status.text = "Baked " + ProjectSettings.globalize_path(path)

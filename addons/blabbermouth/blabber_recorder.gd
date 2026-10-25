@@ -4,7 +4,8 @@ extends Node
 ##
 ## Requires Project Settings > Audio > Driver > Enable Input. On Android,
 ## also tick the RECORD_AUDIO permission in the export preset. On the web,
-## the page must be served over HTTPS and the browser asks for permission.
+## the page must be served over HTTPS; the browser asks for permission and
+## records through BlabberWeb.
 ##
 ## [codeblock]
 ## recorder.start()
@@ -36,6 +37,8 @@ func _ready() -> void:
 
 ## Why recording can't start, or "" if it can.
 static func problem() -> String:
+	if BlabberWeb.available():
+		return "" # The browser records directly (see BlabberWeb).
 	if not ProjectSettings.get_setting("audio/driver/enable_input", false):
 		return "Turn on Project Settings > Audio > Driver > Enable Input to use the microphone."
 	return ""
@@ -46,13 +49,18 @@ func start() -> bool:
 	if p != "":
 		push_warning("BlabberRecorder: " + p)
 		return false
-	if OS.get_name() == "Android":
-		OS.request_permission("android.permission.RECORD_AUDIO")
-	_setup()
-	_capture.clear_buffer()
 	samples = PackedFloat32Array()
-	rate = int(AudioServer.get_mix_rate())
-	_player.play()
+	if BlabberWeb.available():
+		# The browser asks for permission and starts asynchronously.
+		BlabberWeb.start_mic()
+		rate = 48000
+	else:
+		if OS.get_name() == "Android":
+			OS.request_permission("android.permission.RECORD_AUDIO")
+		_setup()
+		_capture.clear_buffer()
+		rate = int(AudioServer.get_mix_rate())
+		_player.play()
 	recording = true
 	set_process(true)
 	return true
@@ -64,7 +72,10 @@ func stop() -> Dictionary:
 		return {"ok": false, "samples": PackedFloat32Array(), "rate": 0, "error": "Not recording."}
 	_drain()
 	recording = false
-	_player.stop()
+	if BlabberWeb.available():
+		BlabberWeb.stop_mic()
+	else:
+		_player.stop()
 	set_process(false)
 	level_changed.emit(0.0)
 	var result := {"ok": true, "samples": samples, "rate": rate, "error": ""}
@@ -80,6 +91,18 @@ func seconds() -> float:
 
 
 func _process(_delta: float) -> void:
+	if BlabberWeb.available():
+		var st := BlabberWeb.state()
+		if st == "error":
+			var err := BlabberWeb.error()
+			BlabberWeb.stop_mic()
+			recording = false
+			set_process(false)
+			level_changed.emit(0.0)
+			stopped.emit({"ok": false, "samples": PackedFloat32Array(), "rate": 0, "error": err})
+			return
+		if st == "starting":
+			return
 	var before := samples.size()
 	_drain()
 	var peak := 0.0
@@ -91,6 +114,12 @@ func _process(_delta: float) -> void:
 
 
 func _drain() -> void:
+	if BlabberWeb.available():
+		var r := BlabberWeb.rate()
+		if r > 0:
+			rate = r
+		samples.append_array(BlabberWeb.take_mic())
+		return
 	var n := _capture.get_frames_available()
 	if n > 0:
 		for f in _capture.get_buffer(n):

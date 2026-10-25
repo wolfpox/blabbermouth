@@ -9,11 +9,28 @@ config/description="Text-to-mumble voice engine for Godot."
 run/main_scene="res://demo/demo.tscn"
 config/features=PackedStringArray("4.3")
 config/icon="res://addons/blabbermouth/icon.svg"
+boot_splash/bg_color=Color(0.11, 0.12, 0.15, 1)
+boot_splash/show_image=false
 
 [audio]
 
 driver/enable_input=true
+driver/output_latency.web=80
+general/default_playback_type.web=0
 
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/blabbermouth/plugin.cfg")
+
+[display]
+
+window/size/viewport_width=1152
+window/size/viewport_height=648
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation=6
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
