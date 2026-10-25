@@ -59,6 +59,7 @@ jobs:
           # Stop here if the tests fail.
           timeout 120 ~/godot/godot --headless --path . -s tools/test_voice_file.gd
           timeout 120 ~/godot/godot --headless --path . -s tools/test_signals.gd
+          timeout 120 ~/godot/godot --headless --path . -s tools/test_g2p.gd
           ~/godot/godot --headless --path . --export-release "Web" build/web/index.html
           test -f build/web/index.wasm
           touch build/web/.nojekyll
