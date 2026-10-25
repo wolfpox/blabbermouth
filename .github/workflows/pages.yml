@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GODOT_VERSION: "4.3"
+  GODOT_VERSION: "4.7.2"
 
 jobs:
   build:
@@ -56,6 +56,9 @@ jobs:
           mkdir -p build/web
           # Import first so class names are registered before exporting.
           timeout 300 ~/godot/godot --headless --path . --import || true
+          # Stop here if the tests fail.
+          timeout 120 ~/godot/godot --headless --path . -s tools/test_voice_file.gd
+          timeout 120 ~/godot/godot --headless --path . -s tools/test_signals.gd
           ~/godot/godot --headless --path . --export-release "Web" build/web/index.html
           test -f build/web/index.wasm
           touch build/web/.nojekyll

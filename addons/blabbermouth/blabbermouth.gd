@@ -26,8 +26,13 @@ signal word_spoken(word: String)
 signal characters_revealed(count: int)
 ## Emitted every frame while speaking. 0 = closed, 1 = wide open.
 signal mouth_moved(openness: float)
-## Emitted when the line ends (or is skipped).
+## Emitted once for every line when it ends: played to the end, skipped,
+## or cut off by stop() or a new speak(). So [code]await finished[/code]
+## always returns.
 signal finished
+## Emitted when a line is cut off by stop() or a new speak(), just before
+## finished. Use it to tell a cut-off line from one that played out.
+signal interrupted
 
 @export var voice: BlabberVoice
 ## An AudioStreamPlayer, AudioStreamPlayer2D or AudioStreamPlayer3D. Leave empty to create one.
@@ -67,11 +72,18 @@ func _ready() -> void:
 	set_process(false)
 
 
-## Starts speaking. Any line already playing is cut off.
+## Starts speaking. Any line already playing is cut off (it emits
+## interrupted and finished first).
 func speak(text: String, override_voice: BlabberVoice = null) -> void:
 	if player == null:
 		push_error("Blabbermouth: speak() called before the node is ready.")
 		return
+	# Code waiting on the old line may start another line from its finished
+	# handler; end those too, so this newest line wins and nothing waits forever.
+	var guard := 0
+	while _speaking and guard < 16:
+		_end_line(false, true)
+		guard += 1
 	var v := override_voice if override_voice else voice
 	if v == null:
 		v = BlabberVoice.preset("man")
@@ -96,23 +108,17 @@ func speak(text: String, override_voice: BlabberVoice = null) -> void:
 	started.emit(text)
 
 
-## Stops speaking without revealing the rest of the text.
+## Stops speaking without revealing the rest of the text. Emits
+## interrupted, then finished.
 func stop() -> void:
-	if not _speaking:
-		return
-	_speaking = false
-	player.stop()
-	set_process(false)
-	_set_mouth(0.0)
+	if _speaking:
+		_end_line(false, true)
 
 
 ## Stops speaking, reveals the whole line and emits finished.
 func skip() -> void:
-	if not _speaking:
-		return
-	stop()
-	_reveal(_visible_total)
-	finished.emit()
+	if _speaking:
+		_end_line(true, false)
 
 
 func is_speaking() -> bool:
@@ -158,12 +164,19 @@ func _process(_delta: float) -> void:
 		_event_i += 1
 	_set_mouth(_synth.mouth_at(played))
 	if _synth.finished and played >= _synth.end_sample:
-		_speaking = false
-		player.stop()
-		set_process(false)
+		_end_line(true, false)
+
+
+func _end_line(reveal_all: bool, cut: bool) -> void:
+	_speaking = false
+	player.stop()
+	set_process(false)
+	_set_mouth(0.0)
+	if reveal_all:
 		_reveal(_visible_total)
-		_set_mouth(0.0)
-		finished.emit()
+	if cut:
+		interrupted.emit()
+	finished.emit()
 
 
 func _fill() -> void:

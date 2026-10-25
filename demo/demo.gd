@@ -48,6 +48,8 @@ var status: Label
 var face: Face
 var playing_all := false
 var studio: SampleStudio
+var library: LibraryPanel
+var library_scroll: ScrollContainer
 var root: BoxContainer
 var tabs: TabContainer
 var right: VBoxContainer
@@ -55,6 +57,7 @@ var help: Label
 var margin: MarginContainer
 
 const SampleStudio := preload("res://demo/sample_studio.gd")
+const LibraryPanel := preload("res://demo/library_panel.gd")
 
 
 class Face extends Control:
@@ -118,6 +121,16 @@ func _ready() -> void:
 	sample_scroll.name = "My voice"
 	sample_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	tabs.add_child(sample_scroll)
+	library_scroll = ScrollContainer.new()
+	library_scroll.name = "Library"
+	library_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	tabs.add_child(library_scroll)
+	library = LibraryPanel.new()
+	library.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	library.get_voice = func() -> BlabberVoice: return voice
+	library.get_name_hint = func() -> String: return preset_name.capitalize() if preset_name in BlabberVoice.PRESET_NAMES else preset_name
+	library.opened.connect(_open_voice)
+	library_scroll.add_child(library)
 	studio = SampleStudio.new()
 	studio.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sample_scroll.add_child(studio)
@@ -170,7 +183,7 @@ func _ready() -> void:
 		panel.add_child(row)
 
 	var save_row := HFlowContainer.new()
-	save_row.add_child(_button("Download voice" if BlabberWeb.available() else "Save voice", _save_voice))
+	save_row.add_child(_button("Save to library…", _save_voice))
 	save_row.add_child(_button("Download line .wav" if BlabberWeb.available() else "Bake line .wav", _bake_line))
 	panel.add_child(save_row)
 	status = Label.new()
@@ -317,6 +330,7 @@ func _refresh_sliders() -> void:
 
 
 func _speak() -> void:
+	playing_all = false # Speaking by hand stops "Play every voice".
 	blab.speak(text_edit.text, voice)
 
 
@@ -333,23 +347,27 @@ func _play_all() -> void:
 	for n in BlabberVoice.PRESET_NAMES:
 		preset_opt.select(BlabberVoice.PRESET_NAMES.find(n))
 		_load_preset(n)
-		_speak()
+		blab.speak(text_edit.text, voice)
 		await blab.finished
 		await get_tree().create_timer(0.3).timeout
+		if not playing_all:
+			return
 	playing_all = false
 
 
 func _save_voice() -> void:
-	# Voices with a recording are saved as binary .res, which keeps them small.
-	var path := ("user://%s_custom.res" if voice.sample_bank else "user://%s_custom.tres") % preset_name
-	var err := ResourceSaver.save(voice, path)
-	if err != OK:
-		status.text = "Save failed (%s)" % error_string(err)
-	elif BlabberWeb.available():
-		BlabberWeb.download(FileAccess.get_file_as_bytes(path), path.get_file())
-		status.text = "Downloaded %s. Put it in your Godot project and use it as a voice." % path.get_file()
-	else:
-		status.text = "Saved " + ProjectSettings.globalize_path(path)
+	tabs.current_tab = library_scroll.get_index()
+	library.focus_name(library.get_name_hint.call())
+
+
+## A voice opened or imported in the Library tab becomes the current voice.
+func _open_voice(v: BlabberVoice, voice_name: String) -> void:
+	voice = v
+	preset_name = voice_name
+	preset_opt.select(-1)
+	studio.show_voice(voice)
+	_refresh_sliders()
+	face.body_color = Color.from_hsv(float(absi(hash(voice_name)) % 360) / 360.0, 0.45, 0.95)
 
 
 func _bake_line() -> void:

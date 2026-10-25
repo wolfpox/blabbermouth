@@ -29,17 +29,21 @@ browser's own audio features, so `.m4a` voice memos from phones load too.
 The page must be served over `https` for the microphone, which GitHub Pages
 does.
 
-To build locally: install Godot 4.3 and its export templates, then run
+To build locally: install Godot 4.7 and its export templates, then run
 `godot --headless --path . --export-release "Web" build/web/index.html`
 and serve `build/web` with any static web server.
 
+The demo project is made with Godot 4.7. The addon itself works in
+Godot 4.3 and later.
+
 ## Quick start
 
-1. Copy `addons/blabbermouth` into your project.
+1. Copy `addons/blabbermouth` into your project and enable it in
+   **Project Settings > Plugins** (needed for `.blab` voice files).
 2. Add a `Blabbermouth` node to a character.
-3. In the inspector, set **Voice** to a preset from `addons/blabbermouth/voices/`
-   (or make a new `BlabberVoice`), and optionally set **Label Path** to your
-   dialogue `Label` / `RichTextLabel`.
+3. In the inspector, set **Voice** to a preset from `addons/blabbermouth/voices/`,
+   a `.blab` voice file in your project, or a new `BlabberVoice`. Optionally
+   set **Label Path** to your dialogue `Label` / `RichTextLabel`.
 4. Call it:
 
 ```gdscript
@@ -87,7 +91,7 @@ v.growl = 0.4
 $Blabbermouth.speak("Mine! All mine!", v)
 ```
 
-Or tweak it in the demo and press **Save voice .tres**.
+Or tweak it in the demo, then in the **Library** tab press **Save .tres for Godot**.
 
 ## Gibberish vs phonetic
 
@@ -117,7 +121,7 @@ In the demo, open the **My voice** tab:
    pieces have no clear pitch.
 3. Tap a piece to hear it. Turn on **Tap removes** to drop coughs and clicks.
 4. Pick a **Character** (as recorded, tiny critter, kid, giant…), then Speak.
-   **Save voice** writes a `.res` with the recording inside.
+   **Save to library…** keeps it, recording included (see below).
 
 How it works:
 
@@ -169,6 +173,78 @@ Notes:
 - Recordings are capped at 30 seconds. Use 5–15 seconds of varied syllables
   for the best results.
 
+## Saving and sharing voices
+
+Voices are saved as `.blab` files: plain JSON text with the settings and,
+for recorded voices, the recording. A `.blab` file can't contain code, so
+it's safe to open one someone else made. Don't share `.tres` or `.res`
+files with people you don't trust: Godot resources can run code when loaded.
+
+In the demo, the **Library** tab saves, opens, renames and deletes voices
+on this device. To move a voice to another device or browser, **Export**
+it, send the file however you like, and **Import** it on the other side
+(on desktop you can also drop a `.blab` file on the window).
+
+Where saved voices live:
+
+| Running as | Saved voices are kept | Gone when |
+|------------|-----------------------|-----------|
+| Desktop app | `user://voices/` (a normal folder) | You delete them |
+| Android app | The app's private storage | The app is uninstalled |
+| Web page (any device) | The browser's storage for this site | Site data is cleared, or a private window closes |
+
+On the web each browser keeps its own voices, so Chrome on your phone and
+Firefox on your laptop don't see each other's. The demo asks the browser
+to keep its storage (`navigator.storage.persist()`), so Safari doesn't
+clear it after a week without visits.
+
+### Using a voice file in your game
+
+With the plugin enabled, put the `.blab` file anywhere in your project
+(for example `res://voices/`). Godot imports it as a voice: drag it onto a
+Blabbermouth node's **Voice**, or load it in code. It's included in
+exported games like any other asset. To update the voice, replace the
+`.blab` file and everything using it picks up the change.
+
+```gdscript
+$Announcer.voice = preload("res://voices/Ring announcer.blab")
+```
+
+A recording made at one pitch can play several characters. Tweak a copy
+in code:
+
+```gdscript
+var color_guy: BlabberVoice = preload("res://voices/Ring announcer.blab").duplicate()
+color_guy.pitch *= 0.85
+color_guy.formant_scale = 0.9   # a bigger throat
+```
+
+### In code
+
+```gdscript
+# Library on this device (user://voices/).
+BlabberLibrary.save(voice, "Grumpy goblin")
+for entry in BlabberLibrary.list():   # {name, path, modified, has_recording}
+	print(entry.name)
+var result := BlabberLibrary.open(BlabberLibrary.path_for("Grumpy goblin"))
+if result.ok:
+	$Blabbermouth.voice = result.voice
+
+# Any file outside the project, or bytes (for downloads and uploads in web
+# exports). For .blab files inside the project, use load() as shown above.
+BlabberVoiceFile.write(voice, "user://goblin.blab", "Grumpy goblin")
+var loaded := BlabberVoiceFile.read("user://goblin.blab")
+var bytes := BlabberVoiceFile.to_bytes(voice, "Grumpy goblin")
+var again := BlabberVoiceFile.from_bytes(bytes)
+```
+
+Loading checks every value: unknown settings are ignored, numbers are kept
+inside each setting's range, and broken recordings are rejected. For web
+exports, `BlabberWeb.place_file_input(button, true, Rect2(), "data")` reads
+a picked file without decoding it as audio; take it with
+`BlabberWeb.take_bytes()` once `BlabberWeb.state()` is `"done"` and
+`BlabberWeb.file_kind()` is `"data"`.
+
 ## Inline tags
 
 | Tag | Effect |
@@ -197,10 +273,12 @@ Punctuation shapes delivery: commas and full stops pause, `...` pauses longer,
 | `word_spoken(word)` | Subtitles, word highlighting |
 | `characters_revealed(count)` | Custom typewriter (matches `visible_characters`) |
 | `mouth_moved(openness)` | Lip-sync, 0 = closed and 1 = wide open |
-| `finished` | The line ended or was skipped |
+| `finished` | The line ended. Fires once for every line, also when it is skipped or cut off, so `await finished` never gets stuck |
+| `interrupted` | The line was cut off by `stop()` or a new `speak()` (fires just before `finished`) |
 
 `mouth_openness` is also available as a property. Methods: `speak()`, `stop()`,
-`skip()` (reveal everything and finish), `is_speaking()`.
+`skip()` (reveal everything and finish), `is_speaking()`. Calling `speak()`
+while a line is playing cuts that line off.
 
 For positional audio, point **Player Path** at an `AudioStreamPlayer2D` or
 `AudioStreamPlayer3D`. Use the **Bus** setting to add reverb or other effects.
@@ -242,4 +320,6 @@ godot --headless --path . -s tools/test_node.gd                 # check the node
 godot --headless --path . -s tools/make_showcase.gd -- demo.wav # one clip of every voice
 godot --headless --path . -s tools/make_presets.gd              # regenerate voices/*.tres
 godot --headless --path . -s tools/test_samples.gd -- /tmp/out a.wav b.ogg  # import, slice and speak recordings
+godot --headless --path . -s tools/test_voice_file.gd           # .blab files and the library (exits 1 on failure)
+godot --headless --path . -s tools/test_signals.gd              # finished / interrupted (exits 1 on failure)
 ```

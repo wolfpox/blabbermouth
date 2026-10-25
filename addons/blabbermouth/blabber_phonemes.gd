@@ -42,8 +42,10 @@ const TABLE := {
 	"f":  {"k": Kind.FRICATIVE, "voiced": false, "nf": 5500.0, "nq": 0.6, "amp": 0.22},
 	"v":  {"k": Kind.FRICATIVE, "voiced": true,  "nf": 5500.0, "nq": 0.6, "amp": 0.18},
 	"th": {"k": Kind.FRICATIVE, "voiced": false, "nf": 6000.0, "nq": 0.7, "amp": 0.18},
-	"s":  {"k": Kind.FRICATIVE, "voiced": false, "nf": 6000.0, "nq": 3.0, "amp": 0.55},
-	"z":  {"k": Kind.FRICATIVE, "voiced": true,  "nf": 6000.0, "nq": 3.0, "amp": 0.42},
+	# "s" is the most common hiss, so it is kept wide and moderate: a narrow
+	# band here turns into a piercing whistle that tires the ear.
+	"s":  {"k": Kind.FRICATIVE, "voiced": false, "nf": 6500.0, "nq": 1.2, "amp": 0.36},
+	"z":  {"k": Kind.FRICATIVE, "voiced": true,  "nf": 6500.0, "nq": 1.2, "amp": 0.28},
 	"sh": {"k": Kind.FRICATIVE, "voiced": false, "nf": 2800.0, "nq": 2.0, "amp": 0.6},
 	"zh": {"k": Kind.FRICATIVE, "voiced": true,  "nf": 2800.0, "nq": 2.0, "amp": 0.48},
 

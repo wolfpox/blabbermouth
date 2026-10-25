@@ -45,6 +45,9 @@ var sensitivity_slider: HSlider
 var info: Label
 var file_dialog: FileDialog
 var load_button: Button
+var character_opt: OptionButton
+var melody_slider: HSlider
+var variety_slider: HSlider
 var _prompt_i := 0
 var _busy := false
 
@@ -109,6 +112,7 @@ func _ready() -> void:
 	cl.custom_minimum_size = Vector2(110, 0)
 	crow.add_child(cl)
 	var copt := OptionButton.new()
+	character_opt = copt
 	for c in CHARACTERS:
 		copt.add_item(c[0])
 	copt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -118,10 +122,10 @@ func _ready() -> void:
 		changed.emit())
 	crow.add_child(copt)
 	add_child(crow)
-	_slider("Follow melody", 0.0, 1.0, 0.01, melody, func(v: float) -> void:
+	melody_slider = _slider("Follow melody", 0.0, 1.0, 0.01, melody, func(v: float) -> void:
 		melody = v
 		changed.emit())
-	_slider("Variety", 1.0, 8.0, 1.0, variety, func(v: float) -> void:
+	variety_slider = _slider("Variety", 1.0, 8.0, 1.0, variety, func(v: float) -> void:
 		variety = int(v)
 		changed.emit())
 
@@ -141,7 +145,10 @@ func _ready() -> void:
 
 	recorder.level_changed.connect(func(l: float) -> void: level_bar.value = l)
 	recorder.stopped.connect(_finish_recording)
-	get_window().files_dropped.connect(func(files: PackedStringArray) -> void: load_path(files[0]))
+	get_window().files_dropped.connect(func(files: PackedStringArray) -> void:
+		# Voice files go to the library panel instead.
+		if files[0].get_extension().to_lower() != BlabberVoiceFile.EXTENSION:
+			load_path(files[0]))
 	# On the web, _process also keeps the file input lined up with its button.
 	set_process(BlabberWeb.available())
 
@@ -203,6 +210,8 @@ func _web_file_input() -> void:
 	if p is Control:
 		clip = (p as Control).get_global_rect()
 	BlabberWeb.place_file_input(load_button, load_button.is_visible_in_tree() and not recorder.recording and not _busy, clip)
+	if BlabberWeb.file_kind() != "audio":
+		return # A voice file for the library panel.
 	match BlabberWeb.state():
 		"decoding":
 			info.text = "Reading %s…" % BlabberWeb.file_name()
@@ -299,6 +308,32 @@ func _on_slice_pressed(i: int) -> void:
 		audition.play()
 	wave.highlight = i
 	wave.queue_redraw()
+
+
+## Shows the recording of a voice opened from the library, or switches
+## "Speak with my voice" off if it has none.
+func show_voice(voice: BlabberVoice) -> void:
+	var b := voice.sample_bank
+	if b == null or b.slice_count() == 0:
+		use_bank = false
+		use_check.set_pressed_no_signal(false)
+		return
+	bank = b
+	use_bank = true
+	use_check.disabled = false
+	use_check.set_pressed_no_signal(true)
+	pitch_mul = voice.pitch / bank.reference_pitch()
+	size_scale = voice.formant_scale
+	melody = voice.sample_melody
+	variety = voice.sample_variety
+	melody_slider.set_value_no_signal(melody)
+	variety_slider.set_value_no_signal(variety)
+	sensitivity_slider.set_value_no_signal(bank.sensitivity)
+	character_opt.select(-1)
+	for i in CHARACTERS.size():
+		if is_equal_approx(CHARACTERS[i][1], snappedf(pitch_mul, 0.01)) and is_equal_approx(CHARACTERS[i][2], size_scale):
+			character_opt.select(i)
+	_show_bank()
 
 
 ## Copies this panel's settings onto a voice.
