@@ -78,7 +78,8 @@ The two settings that matter most:
 
 Changing them separately is what makes a voice sound big or small instead
 of a sped-up recording. Other settings: intonation, pitch variation, speed,
-articulation (hum ↔ crisp consonants), tenseness, breathiness, roughness
+articulation (hum ↔ crisp consonants), sibilance (how strong s, z and sh
+are; lower it if they grate), tenseness, breathiness, roughness
 (rasp), growl, jitter, shimmer, vibrato, voicing (0 = whisper) and ring
 modulation.
 
@@ -95,13 +96,14 @@ Or tweak it in the demo, then in the **Library** tab press **Save .tres for Godo
 
 ## Gibberish vs phonetic
 
-- **Gibberish** (default): each word becomes made-up syllables built from the
+- **Phonetic** (default): follows the letters with English spelling rules
+  (silent e, "-ed", "-tion", plural "z" and so on, plus a list of common
+  irregular words like "the", "one" and "was"), so you can make out the words.
+- **Gibberish**: each word becomes made-up syllables built from the
   voice's `onsets`, `vowels` and `codas`. The same word always sounds the same,
   so players start to "learn" words. Change `language_seed` to give a species
-  its own language. Turn on `speak_names` to keep capitalized names
+  its own language. `speak_names` (on by default) keeps capitalized names
   recognizable.
-- **Phonetic**: follows the letters with simple English rules, so it sounds
-  like mumbled speech that matches the text.
 
 Any language works. Non-Latin text (Japanese, Russian and others) is spoken as
 gibberish with a matching rhythm.
@@ -322,4 +324,5 @@ godot --headless --path . -s tools/make_presets.gd              # regenerate voi
 godot --headless --path . -s tools/test_samples.gd -- /tmp/out a.wav b.ogg  # import, slice and speak recordings
 godot --headless --path . -s tools/test_voice_file.gd           # .blab files and the library (exits 1 on failure)
 godot --headless --path . -s tools/test_signals.gd              # finished / interrupted (exits 1 on failure)
+godot --headless --path . -s tools/test_g2p.gd                  # letters-to-sounds rules (exits 1 on failure)
 ```

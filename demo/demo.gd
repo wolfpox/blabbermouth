@@ -17,6 +17,7 @@ const SLIDERS := [
 	["intonation", 0.0, 12.0, 0.1],
 	["pitch_variation", 0.0, 8.0, 0.1],
 	["articulation", 0.0, 1.0, 0.01],
+	["sibilance", 0.0, 2.0, 0.01],
 	["tenseness", 0.0, 1.0, 0.01],
 	["breathiness", 0.0, 1.0, 0.01],
 	["roughness", 0.0, 1.0, 0.01],
@@ -150,10 +151,12 @@ func _ready() -> void:
 	mode_check = CheckButton.new()
 	mode_check.text = "Follow the letters (phonetic)"
 	mode_check.toggled.connect(func(on: bool) -> void:
-		voice.mode = BlabberVoice.Mode.PHONETIC if on else BlabberVoice.Mode.GIBBERISH)
+		voice.mode = BlabberVoice.Mode.PHONETIC if on else BlabberVoice.Mode.GIBBERISH
+		names_check.disabled = on)
 	panel.add_child(mode_check)
 	names_check = CheckButton.new()
 	names_check.text = "Say capitalized names clearly"
+	names_check.tooltip_text = "For gibberish. Phonetic already says every word, names included."
 	names_check.toggled.connect(func(on: bool) -> void: voice.speak_names = on)
 	panel.add_child(names_check)
 
@@ -327,6 +330,7 @@ func _refresh_sliders() -> void:
 		value_labels[prop].text = _fmt(voice.get(prop))
 	mode_check.set_pressed_no_signal(voice.mode == BlabberVoice.Mode.PHONETIC)
 	names_check.set_pressed_no_signal(voice.speak_names)
+	names_check.disabled = voice.mode == BlabberVoice.Mode.PHONETIC
 
 
 func _speak() -> void:

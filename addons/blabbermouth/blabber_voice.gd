@@ -11,7 +11,7 @@ extends Resource
 enum Mode {
 	## Each word becomes made-up syllables. The same word always sounds the same.
 	GIBBERISH,
-	## Follows the letters of the text, so it sounds like mumbled speech.
+	## Follows the letters of the text, so you can make out the words. The default.
 	PHONETIC,
 }
 
@@ -63,6 +63,9 @@ const EMOTIONS := {
 @export_range(0.3, 3.0, 0.01) var speed := 1.0
 ## How crisp consonants are. 0 = a hum, 1 = clear consonants.
 @export_range(0.0, 1.0, 0.01) var articulation := 0.75
+## How strong hissing sounds (s, z, sh) are. 1 = normal, lower if they grate,
+## higher for a hissy or lisping character.
+@export_range(0.0, 2.0, 0.01) var sibilance := 1.0
 ## Short gap between words, in seconds.
 @export_range(0.0, 0.2, 0.005, "suffix:s") var word_gap := 0.03
 ## Scales pauses at commas and full stops.
@@ -70,9 +73,9 @@ const EMOTIONS := {
 @export_range(0.0, 2.0, 0.01) var volume := 0.8
 
 @export_group("Language")
-@export var mode := Mode.GIBBERISH
+@export var mode := Mode.PHONETIC
 ## Gibberish onsets, space separated. Repeat a sound to make it more common.
-## Clusters like "gr" are fine. Sounds: b d g p t k m n ng l r w y f v th s z sh zh h ch j.
+## Clusters like "gr" are fine. Sounds: b d g p t k m n ng l r w y f v th dh s z sh zh h ch j.
 @export var onsets := "b d g k m n l r s t p w h y v z f sh"
 ## Gibberish vowels: a ae e i ih o u uh er. Two-letter combos like "ai" make a glide.
 @export var vowels := "a e i o u a e"
@@ -83,7 +86,7 @@ const EMOTIONS := {
 ## Change this to give a species its own "language" with the same sounds.
 @export var language_seed := 0
 ## In gibberish mode, speak capitalized names phonetically so they stay recognizable.
-@export var speak_names := false
+@export var speak_names := true
 
 @export_group("Samples")
 ## A recorded voice. When set, lines are spoken with these syllables instead of the synth.

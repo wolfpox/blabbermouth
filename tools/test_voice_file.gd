@@ -22,8 +22,10 @@ func _init() -> void:
 
 func _test_settings_round_trip() -> void:
 	var v := BlabberVoice.preset("goblin")
-	v.mode = BlabberVoice.Mode.PHONETIC
-	v.speak_names = true
+	# Non-default values, so the round trip proves they were saved.
+	v.mode = BlabberVoice.Mode.GIBBERISH
+	v.speak_names = false
+	v.sibilance = 0.6
 	v.pitch = 333.0
 	var r := BlabberVoiceFile.from_bytes(BlabberVoiceFile.to_bytes(v, "Grumpy goblin"))
 	check(r.ok, "settings round trip loads: " + r.error)
