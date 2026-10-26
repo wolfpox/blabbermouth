@@ -1,0 +1,14 @@
+[remap]
+
+importer="blabbermouth.voice"
+type="Resource"
+uid="uid://u0rs7vutwt1h"
+path="res://.godot/imported/hello_traveler.blab-d546b2d70bef6e664cfff08ed9fc29bb.res"
+
+[deps]
+
+source_file="res://demo/lines/hello_traveler.blab"
+dest_files=["res://.godot/imported/hello_traveler.blab-d546b2d70bef6e664cfff08ed9fc29bb.res"]
+
+[params]
+

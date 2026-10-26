@@ -1,8 +1,9 @@
 @tool
 extends EditorImportPlugin
-## Imports .blab voice files as BlabberVoice resources, so a .blab in your
-## project can be dragged onto a Blabbermouth node's Voice and is included
-## in exported games. Replace the .blab file and every user picks up the change.
+## Imports .blab files: a voice file becomes a BlabberVoice (drag it onto a
+## Blabbermouth node's Voice) and a line file becomes a BlabberLine (give it
+## to a BlabberDialogue). Either way it's included in exported games, and
+## replacing the .blab file updates everything that uses it.
 
 
 func _get_importer_name() -> String:
@@ -10,7 +11,7 @@ func _get_importer_name() -> String:
 
 
 func _get_visible_name() -> String:
-	return "Blabbermouth Voice"
+	return "Blabbermouth Voice or Line"
 
 
 func _get_recognized_extensions() -> PackedStringArray:
@@ -55,11 +56,20 @@ func _can_import_threaded() -> bool:
 
 func _import(source_file: String, save_path: String, _options: Dictionary,
 		_platform_variants: Array[String], _gen_files: Array[String]) -> Error:
-	var r := BlabberVoiceFile.read(source_file)
-	if not r.ok:
-		push_error("Blabbermouth: can't import %s: %s" % [source_file, r.error])
-		return ERR_PARSE_ERROR
-	var voice: BlabberVoice = r.voice
+	var bytes := FileAccess.get_file_as_bytes(source_file)
+	var out: Resource
+	if BlabberLineFile.is_line(bytes):
+		var r := BlabberLineFile.from_bytes(bytes)
+		if not r.ok:
+			push_error("Blabbermouth: can't import %s: %s" % [source_file, r.error])
+			return ERR_PARSE_ERROR
+		out = r.line
+	else:
+		var r := BlabberVoiceFile.from_bytes(bytes)
+		if not r.ok:
+			push_error("Blabbermouth: can't import %s: %s" % [source_file, r.error])
+			return ERR_PARSE_ERROR
+		out = r.voice
 	# Name it after the file, like other imported assets.
-	voice.resource_name = source_file.get_file().get_basename()
-	return ResourceSaver.save(voice, "%s.%s" % [save_path, _get_save_extension()], ResourceSaver.FLAG_COMPRESS)
+	out.resource_name = source_file.get_file().get_basename()
+	return ResourceSaver.save(out, "%s.%s" % [save_path, _get_save_extension()], ResourceSaver.FLAG_COMPRESS)

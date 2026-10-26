@@ -1,0 +1,65 @@
+{
+	"blabbermouth_line": 1,
+	"speaker": {
+		"bubble": {
+			"corner_radius": 16,
+			"fill": "f4ecddff",
+			"font_size": 24,
+			"muted_color": "6b5a47ff",
+			"name_color": "4a3423ff",
+			"name_text_color": "f4ecddff",
+			"outline": "4a3423ff",
+			"outline_width": 3,
+			"padding": [
+				28.0,
+				26.0,
+				28.0,
+				22.0
+			],
+			"shadow_color": "00000040",
+			"shadow_offset": [
+				0.0,
+				5.0
+			],
+			"shadow_size": 0,
+			"tail": true,
+			"tail_size": 16,
+			"text_color": "2a1d12ff"
+		},
+		"name": "Aldric",
+		"voice": {
+			"articulation": 0.8,
+			"breathiness": 0.08,
+			"coda_chance": 0.2,
+			"codas": "n m s k t r l",
+			"formant_scale": 1.0,
+			"growl": 0.0,
+			"intonation": 4.0,
+			"jitter": 0.01,
+			"language_seed": 0,
+			"mode": 1,
+			"onset_chance": 0.85,
+			"onsets": "b d g k m n l r s t p w h y v z f sh",
+			"pause_scale": 1.0,
+			"pitch": 112.0,
+			"pitch_variation": 1.0,
+			"ring_mod_hz": 0.0,
+			"ring_mod_mix": 0.0,
+			"roughness": 0.0,
+			"sample_melody": 0.8,
+			"sample_variety": 3,
+			"shimmer": 0.05,
+			"sibilance": 1.0,
+			"speak_names": true,
+			"speed": 0.95,
+			"tenseness": 0.5,
+			"vibrato_depth": 0.0,
+			"vibrato_rate": 5.5,
+			"voicing": 1.0,
+			"volume": 0.8,
+			"vowels": "a e i o u a e",
+			"word_gap": 0.03
+		}
+	},
+	"text": "Hello there, [wave]traveler![/wave] Have you seen my [swell]little lantern[/swell]? It was right here...[pause=0.5] [whisper]I swear.[/whisper]"
+}

@@ -2,6 +2,7 @@
 class_name BlabberVoiceFile
 extends RefCounted
 ## Saves and loads voices as .blab files, for sharing and moving between devices.
+## (A .blab file can also hold a whole line of dialogue: see BlabberLineFile.)
 ##
 ## A .blab file is plain JSON text: the voice settings, plus the recording
 ## (as 16-bit audio in base64) when the voice has one. Unlike .tres and .res
@@ -15,7 +16,7 @@ extends RefCounted
 
 const EXTENSION := "blab"
 const FORMAT := 1 ## Bumped when the layout changes in a way old versions can't read.
-const MAX_BYTES := 16 * 1024 * 1024
+const MAX_BYTES := 32 * 1024 * 1024
 const MAX_NAME := 60
 const MAX_TEXT := 400 ## Longest onsets / vowels / codas string.
 const SKIP := ["sample_bank"]
@@ -51,48 +52,92 @@ static func to_bytes(voice: BlabberVoice, voice_name := "") -> PackedByteArray:
 	var data := {
 		"blabbermouth_voice": FORMAT,
 		"name": clean_name(voice_name if voice_name != "" else voice.resource_name),
-		"voice": settings_of(voice),
 	}
-	var bank := voice.sample_bank
-	if bank != null and bank.slice_count() > 0:
-		data["samples"] = _bank_to_dict(bank)
+	data.merge(voice_to_dict(voice))
 	return JSON.stringify(data, "\t").to_utf8_buffer()
 
 
 ## Reads a voice from file contents. Returns {ok, voice, name, error}.
 ## fallback_name is used when the file has no name inside.
+## A line file (see BlabberLineFile) gives its speaker's voice.
 static func from_bytes(bytes: PackedByteArray, fallback_name := "") -> Dictionary:
-	if bytes.size() > MAX_BYTES:
-		return _fail("This file is too big to be a voice file.")
-	# Check it looks like JSON before decoding, so audio or images fail politely.
-	var first := 0
-	while first < bytes.size() and bytes[first] in [9, 10, 13, 32, 0xEF, 0xBB, 0xBF]:
-		first += 1
-	if first >= bytes.size() or bytes[first] != 0x7B: # "{"
-		return _fail("This isn't a Blabbermouth voice file.")
-	var json := JSON.new()
-	if json.parse(bytes.get_string_from_utf8()) != OK or typeof(json.data) != TYPE_DICTIONARY:
-		return _fail("This voice file is damaged.")
-	var data: Dictionary = json.data
-	var version = data.get("blabbermouth_voice")
-	if typeof(version) != TYPE_FLOAT and typeof(version) != TYPE_INT:
-		return _fail("This isn't a Blabbermouth voice file.")
-	if int(version) > FORMAT:
-		return _fail("This voice was made with a newer version of Blabbermouth.")
-	var voice := BlabberVoice.new()
-	var settings = data.get("voice", {})
-	if typeof(settings) == TYPE_DICTIONARY:
-		apply_settings(voice, settings)
-	if data.has("samples"):
-		var bank := _bank_from_dict(data.samples)
-		if bank == null:
-			return _fail("The recording in this voice file is damaged.")
-		voice.sample_bank = bank
+	var parsed := decode_json(bytes, "voice")
+	if not parsed.ok:
+		return _fail(parsed.error)
+	var data: Dictionary = parsed.data
+	if data.has("blabbermouth_line"):
+		var line_version = data.blabbermouth_line
+		if not _is_num(line_version) or typeof(data.get("speaker")) != TYPE_DICTIONARY:
+			return _fail("This line file is damaged.")
+		if int(line_version) > BlabberLineFile.FORMAT:
+			return _fail("This line was made with a newer version of Blabbermouth.")
+		data = data.speaker
+	else:
+		var version = data.get("blabbermouth_voice")
+		if not _is_num(version):
+			return _fail("This isn't a Blabbermouth voice file.")
+		if int(version) > FORMAT:
+			return _fail("This voice was made with a newer version of Blabbermouth.")
+	var r := voice_from_dict(data)
+	if not r.ok:
+		return r
+	var voice: BlabberVoice = r.voice
 	var voice_name := clean_name(str(data.get("name", "")))
 	if voice_name == "":
 		voice_name = clean_name(fallback_name)
 	voice.resource_name = voice_name
 	return {"ok": true, "voice": voice, "name": voice_name, "error": ""}
+
+
+## A voice as plain values: {"voice": settings, "samples": recording}.
+## "samples" is left out when the voice has no recording.
+static func voice_to_dict(voice: BlabberVoice) -> Dictionary:
+	var d := {"voice": settings_of(voice)}
+	var bank := voice.sample_bank
+	if bank != null and bank.slice_count() > 0:
+		d["samples"] = _bank_to_dict(bank)
+	return d
+
+
+## Rebuilds a voice from voice_to_dict() values. Returns {ok, voice, error}.
+static func voice_from_dict(d: Dictionary) -> Dictionary:
+	var voice := BlabberVoice.new()
+	var settings = d.get("voice", {})
+	if typeof(settings) == TYPE_DICTIONARY:
+		apply_settings(voice, settings)
+	if d.has("samples"):
+		var bank := _bank_from_dict(d.samples)
+		if bank == null:
+			return _fail("The recording in this file is damaged.")
+		voice.sample_bank = bank
+	return {"ok": true, "voice": voice, "name": "", "error": ""}
+
+
+## A separate copy of a voice, recording included.
+static func copy_voice(voice: BlabberVoice) -> BlabberVoice:
+	var v := BlabberVoice.new()
+	apply_settings(v, settings_of(voice))
+	if voice.sample_bank:
+		v.sample_bank = voice.sample_bank.duplicate()
+	v.resource_name = voice.resource_name
+	return v
+
+
+## Checks file contents look like a Blabbermouth JSON file and decodes them.
+## Returns {ok, data, error}. what names the file in messages ("voice", "line").
+static func decode_json(bytes: PackedByteArray, what := "voice") -> Dictionary:
+	if bytes.size() > MAX_BYTES:
+		return {"ok": false, "data": {}, "error": "This file is too big to be a %s file." % what}
+	# Check it looks like JSON before decoding, so audio or images fail politely.
+	var first := 0
+	while first < bytes.size() and bytes[first] in [9, 10, 13, 32, 0xEF, 0xBB, 0xBF]:
+		first += 1
+	if first >= bytes.size() or bytes[first] != 0x7B: # "{"
+		return {"ok": false, "data": {}, "error": "This isn't a Blabbermouth %s file." % what}
+	var json := JSON.new()
+	if json.parse(bytes.get_string_from_utf8()) != OK or typeof(json.data) != TYPE_DICTIONARY:
+		return {"ok": false, "data": {}, "error": "This %s file is damaged." % what}
+	return {"ok": true, "data": json.data, "error": ""}
 
 
 ## A voice's settings as plain values (no recording).
@@ -138,6 +183,10 @@ static func clean_name(text: String) -> String:
 
 
 # --- Internals ------------------------------------------------------------------
+
+static func _is_num(v) -> bool:
+	return typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT
+
 
 static func _fail(msg: String) -> Dictionary:
 	return {"ok": false, "voice": null, "name": "", "error": msg}

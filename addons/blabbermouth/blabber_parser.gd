@@ -8,7 +8,25 @@ extends RefCounted
 const P := preload("res://addons/blabbermouth/blabber_phonemes.gd")
 const Kind := P.Kind
 
-const KNOWN_TAGS := ["pause", "speed", "pitch", "volume", "emote", "whisper", "shout", "reset"]
+## Effects that change both the voice and how the words move on screen.
+## They can be combined with each other, with an emotion and with whisper or shout.
+const EFFECT_TAGS := ["shiver", "wave", "swell", "bounce", "droop", "jolt"]
+const KNOWN_TAGS := ["pause", "speed", "pitch", "volume", "emote", "whisper", "shout", "reset",
+	"shiver", "wave", "swell", "bounce", "droop", "jolt"]
+## Steady voice changes for each effect, in the same form as BlabberVoice.EMOTIONS.
+## wave, swell, bounce, droop and jolt also shape the melody syllable by syllable.
+const EFFECT_VOICE := {
+	"shiver": {"jitter": 0.03, "vib_depth": 0.7, "vib_rate": 9.5, "breath": 0.08},
+	"wave": {},
+	"swell": {},
+	"bounce": {"pitch": 1.04, "speed": 1.06, "intonation": 1.2},
+	"droop": {"speed": 0.88, "breath": 0.12, "intonation": 0.6},
+	"jolt": {"rough": 0.25, "growl": 0.12, "tense": 0.2, "volume": 1.12},
+}
+## The on-screen effect that goes with each emotion (see to_bbcode).
+const EMOTE_EFFECT := {"scared": "shiver", "happy": "bounce", "excited": "bounce", "sad": "droop", "angry": "jolt"}
+## Emotion keys that multiply. All others add, except vib_rate, which replaces.
+const SCALED_KEYS := ["pitch", "intonation", "speed", "volume"]
 const PUNCT_PAUSE := {",": 0.16, ";": 0.22, ":": 0.22, ".": 0.34, "!": 0.32, "?": 0.34, "…": 0.55, "\n": 0.3, "—": 0.2}
 const SENTENCE_ENDS := ".!?…\n"
 const DIGIT_WORDS := ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
@@ -102,6 +120,101 @@ static func strip_all_tags(text: String) -> String:
 	return _tag_regex().sub(text, "", true)
 
 
+## Turns Blabbermouth tags into RichTextLabel BBCode that shows what the voice
+## does: effects become moving text, shout is bold (and bigger when
+## base_font_size is given), whisper is italic (and smaller, in muted_color
+## when given), and emotions get their matching effect (scared shivers, happy
+## and excited bounce, sad droops, angry jolts). Tags only the voice uses
+## (pause, speed, pitch, volume) are removed. Other BBCode is kept.
+## The moving effects need BlabberTextEffects.install() on the label.
+## Visible characters match build().visible.
+static func to_bbcode(text: String, base_font_size := 0, muted_color := Color(0, 0, 0, 0)) -> String:
+	var out := ""
+	var last := 0
+	var stack: Array = [] # [key, open, close], innermost last
+	for m in _tag_regex().search_all(text):
+		var tag := m.get_string(2).to_lower()
+		if not tag in KNOWN_TAGS:
+			continue
+		out += text.substr(last, m.get_start() - last)
+		last = m.get_end()
+		var closing := m.get_string(1) == "/"
+		var val := m.get_string(3).to_lower()
+		if tag == "reset":
+			while not stack.is_empty():
+				out += stack.pop_back()[2]
+			continue
+		var key := tag
+		var look := tag
+		if tag == "emote":
+			look = val
+		if tag in ["whisper", "shout"] or (tag == "emote" and val in ["whisper", "shout"]):
+			key = "delivery"
+		if closing:
+			out += _close_bb(stack, key)
+			continue
+		var pair := _bb_for(look, base_font_size, muted_color)
+		if pair.is_empty():
+			# An emotion with no picture (neutral): still ends the one before it.
+			if key == "emote":
+				out += _close_bb(stack, key)
+			continue
+		out += _close_bb(stack, key) # A new emotion or delivery replaces the old one.
+		stack.append([key, pair[0], pair[1]])
+		out += pair[0]
+	out += text.substr(last)
+	while not stack.is_empty():
+		out += stack.pop_back()[2]
+	return out
+
+
+## [open, close] BBCode for an effect, emotion or delivery. Empty if it has none.
+static func _bb_for(name: String, base_font_size: int, muted_color: Color) -> Array:
+	if EMOTE_EFFECT.has(name):
+		name = EMOTE_EFFECT[name]
+	match name:
+		"wave":
+			return ["[wave amp=22.0 freq=4.0 connected=1]", "[/wave]"]
+		"shiver", "swell", "bounce", "droop", "jolt":
+			return ["[%s]" % name, "[/%s]" % name]
+		"shout":
+			if base_font_size > 0:
+				return ["[font_size=%d][b]" % roundi(base_font_size * 1.3), "[/b][/font_size]"]
+			return ["[b]", "[/b]"]
+		"whisper":
+			var open := "[i]"
+			var close := "[/i]"
+			if base_font_size > 0:
+				open = "[font_size=%d]" % roundi(base_font_size * 0.82) + open
+				close += "[/font_size]"
+			if muted_color.a > 0.0:
+				open = "[color=#%s]" % muted_color.to_html() + open
+				close += "[/color]"
+			return [open, close]
+	return []
+
+
+## Closes the open tag with this key. Tags opened inside it are closed first
+## and opened again afterwards, so the BBCode always nests properly.
+static func _close_bb(stack: Array, key: String) -> String:
+	var at := -1
+	for k in range(stack.size() - 1, -1, -1):
+		if stack[k][0] == key:
+			at = k
+			break
+	if at < 0:
+		return ""
+	var out := ""
+	var inner := stack.slice(at + 1)
+	for k in range(stack.size() - 1, at - 1, -1):
+		out += stack[k][2]
+	stack.resize(at)
+	for e in inner:
+		out += e[1]
+		stack.append(e)
+	return out
+
+
 ## Returns {segments, display_text, plain_text, visible}. "visible" is the number of
 ## visible characters, matching Label/RichTextLabel.visible_characters.
 static func build(text: String, voice: BlabberVoice) -> Dictionary:
@@ -114,13 +227,16 @@ static func build(text: String, voice: BlabberVoice) -> Dictionary:
 	for s in sentences:
 		_build_sentence(s, voice, rng, segs)
 	_push(segs, _silence(0.15, scan.visible, segs))
-	return {"segments": segs, "display_text": strip_tags(text), "plain_text": strip_all_tags(text), "visible": scan.visible}
+	return {"segments": segs, "display_text": strip_tags(text), "plain_text": strip_all_tags(text),
+		"visible": scan.visible}
 
 
 # --- Step 1: tags and visible characters -------------------------------------
 
+## fx maps each active effect to the visible index where it started.
+## fx_end (shared by every state of a line) maps "name:start" to where it ended.
 static func _default_state() -> Dictionary:
-	return {"speed": 1.0, "pitch": 1.0, "volume": 1.0, "emote": "neutral"}
+	return {"speed": 1.0, "pitch": 1.0, "volume": 1.0, "emote": "neutral", "delivery": "", "fx": {}}
 
 
 static func _scan(text: String) -> Dictionary:
@@ -142,17 +258,28 @@ static func _scan(text: String) -> Dictionary:
 					if tag == "pause":
 						items.append({"t": "pause", "s": val.to_float() if val != "" else 0.4, "i": vis})
 					else:
-						state = _apply_tag(state, tag, val, closing)
+						state = _apply_tag(state, tag, val, closing, vis)
 				# Unknown tags (BBCode etc.) are silent and invisible.
 				i = m.get_end()
 				continue
 		items.append({"t": "char", "c": ch, "i": vis, "st": state})
 		vis += 1
 		i += 1
+	# Record where each effect ends, so swell and droop know how far along they are.
+	var fx_end := {}
+	for it in items:
+		if it.t != "char":
+			continue
+		for name in it.st.fx:
+			var key := "%s:%d" % [name, it.st.fx[name]]
+			fx_end[key] = maxi(fx_end.get(key, 0), it.i + 1)
+	for it in items:
+		if it.t == "char":
+			it.st.fx_end = fx_end
 	return {"items": items, "visible": vis}
 
 
-static func _apply_tag(state: Dictionary, tag: String, val: String, closing: bool) -> Dictionary:
+static func _apply_tag(state: Dictionary, tag: String, val: String, closing: bool, vis: int) -> Dictionary:
 	if tag == "reset":
 		return _default_state()
 	var s := state.duplicate()
@@ -160,9 +287,21 @@ static func _apply_tag(state: Dictionary, tag: String, val: String, closing: boo
 		"speed", "pitch", "volume":
 			s[tag] = 1.0 if closing or val == "" else maxf(val.to_float(), 0.05)
 		"emote":
-			s.emote = "neutral" if closing else val.to_lower()
+			# Older lines use [emote=whisper] and [emote=shout].
+			var e := val.to_lower()
+			if e in ["whisper", "shout"]:
+				s.delivery = "" if closing else e
+			else:
+				s.emote = "neutral" if closing else e
 		"whisper", "shout":
-			s.emote = "neutral" if closing else tag
+			s.delivery = "" if closing else tag
+		"shiver", "wave", "swell", "bounce", "droop", "jolt":
+			var fx: Dictionary = s.fx.duplicate()
+			if closing:
+				fx.erase(tag)
+			elif not fx.has(tag):
+				fx[tag] = vis
+			s.fx = fx
 	return s
 
 
@@ -613,6 +752,51 @@ static func _st(semis: float) -> float:
 	return pow(2.0, semis / 12.0)
 
 
+## Stacks two emotion-style modifiers (see SCALED_KEYS).
+static func _combine(a: Dictionary, b: Dictionary) -> Dictionary:
+	if b.is_empty():
+		return a
+	var out := a.duplicate()
+	for k in b:
+		if k in SCALED_KEYS:
+			out[k] = out.get(k, 1.0) * b[k]
+		elif k == "vib_rate":
+			out[k] = b[k]
+		else:
+			out[k] = out.get(k, 0.0) + b[k]
+	return out
+
+
+## How far through an effect a character is, 0 at its start to 1 at its end.
+static func _fx_progress(st: Dictionary, name: String, char_pos: int) -> float:
+	var start: int = st.fx[name]
+	var end: int = st.fx_end.get("%s:%d" % [name, start], start + 1)
+	return clampf(float(char_pos - start) / maxf(1.0, end - start - 1.0), 0.0, 1.0)
+
+
+## Melody and loudness changes from wave, swell, bounce, droop and jolt for
+## one syllable. Returns [semitones, loudness multiplier].
+static func _fx_shape(st: Dictionary, char_pos: int, syl_n: int) -> Array:
+	var semis := 0.0
+	var amp := 1.0
+	var fx: Dictionary = st.fx
+	if fx.has("wave"):
+		semis += 3.0 * sin(TAU * (char_pos - fx.wave) / 7.0)
+	if fx.has("swell"):
+		var t := _fx_progress(st, "swell", char_pos)
+		semis += 2.5 * t
+		amp *= 0.7 + 0.7 * t
+	if fx.has("droop"):
+		var t := _fx_progress(st, "droop", char_pos)
+		semis -= 5.0 * t
+		amp *= 1.0 - 0.3 * t
+	if fx.has("bounce"):
+		semis += 2.0 if syl_n % 2 == 0 else -0.5
+	if fx.has("jolt") and syl_n % 2 == 0:
+		amp *= 1.25
+	return [semis, amp]
+
+
 static func _build_sentence(s: Dictionary, voice: BlabberVoice, rng: RandomNumberGenerator, segs: Array) -> void:
 	var words: Array = []
 	for tok in s.tokens:
@@ -651,7 +835,9 @@ static func _build_sentence(s: Dictionary, voice: BlabberVoice, rng: RandomNumbe
 static func _emit_word(w: Dictionary, voice: BlabberVoice, rng: RandomNumberGenerator, segs: Array,
 		kind: String, syl_k: int, total_syl: int, is_first: bool, is_last: bool, next_is_word: bool) -> float:
 	var st: Dictionary = w.st
-	var emo := BlabberVoice.emotion(st.emote)
+	var emo := _combine(BlabberVoice.emotion(st.emote), BlabberVoice.emotion(st.delivery))
+	for name in st.fx:
+		emo = _combine(emo, EFFECT_VOICE[name])
 	var speed: float = maxf(voice.speed * st.speed * emo.get("speed", 1.0), 0.05)
 	var inton: float = voice.intonation * emo.get("intonation", 1.0)
 	var base: float = voice.pitch * st.pitch * emo.get("pitch", 1.0)
@@ -694,6 +880,10 @@ static func _emit_word(w: Dictionary, voice: BlabberVoice, rng: RandomNumberGene
 			semis += inton * 0.5 + 1.0
 			amp *= 1.3
 			dm *= 1.15
+		if not st.fx.is_empty():
+			var shape := _fx_shape(st, pd.rev - 1, syl_k + syl_i)
+			semis += shape[0]
+			amp *= shape[1]
 		var p0 := base * _st(semis)
 		var p1 := p0
 		if is_last and syl_i == nsyl - 1:

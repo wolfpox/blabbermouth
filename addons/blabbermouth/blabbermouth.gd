@@ -13,8 +13,11 @@ extends Node
 ## [pause=0.5]  [speed=1.5]...[/speed]  [pitch=1.2]...[/pitch]
 ## [volume=0.5]...[/volume]  [emote=angry]...[/emote]
 ## [whisper]...[/whisper]  [shout]...[/shout]  [reset]
+## [shiver] [wave] [swell] [bounce] [droop] [jolt] ...[/name]
 ## [/codeblock]
-## Emotions: happy, excited, angry, sad, scared, whisper, shout.
+## Emotions: happy, excited, angry, sad, scared. Effects, an emotion and
+## whisper or shout can all be combined. On a RichTextLabel the effects,
+## emotions, whisper and shout also show in the text (see [member text_effects]).
 
 ## Emitted when a line starts playing.
 signal started(text: String)
@@ -40,6 +43,12 @@ signal interrupted
 ## Optional Label or RichTextLabel to reveal in sync with the voice.
 @export var label_path: NodePath
 @export var bus: StringName = &"Master"
+## On a RichTextLabel with BBCode on, show what the voice does: moving text for
+## effects and emotions, bold for shout, small italics for whisper.
+## Off: Blabbermouth tags are just removed.
+@export var text_effects := true
+## Color for whispered words. Transparent: the label's text color, faded.
+@export var whisper_color := Color(0, 0, 0, 0)
 ## Lower is cheaper. 22050 sounds fine for most voices.
 @export_enum("16000:16000", "22050:22050", "32000:32000", "44100:44100") var sample_rate: int = 22050
 
@@ -94,7 +103,15 @@ func speak(text: String, override_voice: BlabberVoice = null) -> void:
 	_revealed = 0
 	if label:
 		var rich: bool = label is RichTextLabel and label.bbcode_enabled
-		label.text = plan.display_text if rich else plan.plain_text
+		if rich and text_effects:
+			BlabberTextEffects.install(label)
+			var muted := whisper_color
+			if muted.a <= 0.0:
+				muted = label.get_theme_color("default_color")
+				muted.a *= 0.7
+			label.text = BlabberParser.to_bbcode(text, label.get_theme_font_size("normal_font_size"), muted)
+		else:
+			label.text = plan.display_text if rich else plan.plain_text
 		label.visible_characters = 0
 	var gen := AudioStreamGenerator.new()
 	gen.mix_rate = sample_rate
@@ -145,6 +162,25 @@ static func bake(text: String, p_voice: BlabberVoice, p_sample_rate: int = 22050
 	wav.stereo = false
 	wav.data = data
 	return wav
+
+
+## When each word starts and ends, in seconds, for captions or lip-sync in
+## another engine. Returns [{word, start, end}, ...].
+static func word_timings(text: String, p_voice: BlabberVoice, p_sample_rate: int = 22050) -> Array:
+	var plan := BlabberParser.build(text, p_voice)
+	var synth := BlabberEngine.create(plan.segments, p_voice, p_sample_rate)
+	synth.render_all()
+	var out: Array = []
+	for ev in synth.events:
+		var seg: Dictionary = synth.segments[ev.y]
+		var t := float(ev.x) / p_sample_rate
+		if not out.is_empty() and out[-1].end < 0.0 and (seg.word != "" or seg.ph == ""):
+			out[-1].end = t
+		if seg.word != "":
+			out.append({"word": seg.word, "start": t, "end": -1.0})
+	if not out.is_empty() and out[-1].end < 0.0:
+		out[-1].end = float(synth.end_sample) / p_sample_rate
+	return out
 
 
 func _process(_delta: float) -> void:

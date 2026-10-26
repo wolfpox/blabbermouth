@@ -255,13 +255,32 @@ a picked file without decoding it as audio; take it with
 | `[speed=1.5]…[/speed]` | Faster or slower |
 | `[pitch=1.2]…[/pitch]` | Higher or lower |
 | `[volume=0.5]…[/volume]` | Louder or quieter |
-| `[emote=angry]…[/emote]` | happy, excited, angry, sad, scared, whisper, shout |
-| `[whisper]…[/whisper]`, `[shout]…[/shout]` | Shortcuts |
+| `[emote=angry]…[/emote]` | happy, excited, angry, sad, scared |
+| `[whisper]…[/whisper]`, `[shout]…[/shout]` | Breathy and quiet, or loud and tense |
+| `[shiver]…[/shiver]` | Trembling voice, shaking letters |
+| `[wave]…[/wave]` | Sing-song pitch, letters ride a wave |
+| `[swell]…[/swell]` | Grows louder and higher, letters swell |
+| `[bounce]…[/bounce]` | Bright and bouncy, letters hop |
+| `[droop]…[/droop]` | Sinks lower and slower, letters sag |
+| `[jolt]…[/jolt]` | Rough, angry accents, letters jerk |
 | `[reset]` | Back to normal |
 
-Other tags, like BBCode `[b]`, are left alone and stay silent, so the same
-string can go straight into a `RichTextLabel` with BBCode enabled.
-For a plain `Label`, all tags are removed automatically.
+Effects, an emotion and whisper or shout all stack: `[emote=sad][whisper]…`
+is a sad whisper.
+
+In a `RichTextLabel` with BBCode enabled, the text shows what the voice does:
+the six effects move the letters, emotions get their matching effect (scared
+shivers, happy bounces, sad droops, angry jolts), shouting is bold and bigger,
+and whispers are small, faded italics. Turn this off with **Text Effects** on
+the node. Other tags, like BBCode `[b]`, are left alone and stay silent. For a
+plain `Label`, all tags are removed automatically.
+
+To use the moving text in a label of your own:
+
+```gdscript
+BlabberTextEffects.install($Label)
+$Label.text = BlabberParser.to_bbcode("[shiver]W-what was that?[/shiver]")
+```
 
 Punctuation shapes delivery: commas and full stops pause, `...` pauses longer,
 `?` rises at the end, `!` adds energy, and words in CAPS are stressed.
@@ -295,6 +314,55 @@ $AudioStreamPlayer.stream = wav
 wav.save_to_wav("user://welcome.wav")
 ```
 
+## Lines and speech bubbles
+
+A **line** is the words with their tags plus its own copy of the **speaker**:
+a name, a voice and a bubble style. Save it as a `.blab` file and a game can
+use all of it, or only the parts it wants.
+
+```gdscript
+var bubble := BlabberBubbleStyle.new()   # a StyleBoxFlat, plus font and text colors
+bubble.bg_color = Color("f4ecdd")
+bubble.border_color = Color("4a3423")
+bubble.font = preload("res://fonts/Alegreya.ttf")
+var aldric := BlabberSpeaker.create("Aldric", preload("res://addons/blabbermouth/voices/man.tres"), bubble)
+
+var line := BlabberLine.create("Hello there, [wave]traveler![/wave]", aldric)  # copies the speaker
+BlabberLineFile.write(line, "user://hello_traveler.blab")   # font included
+```
+
+With the plugin enabled, a `.blab` line in your project imports as a
+`BlabberLine`. Show it with a **BlabberDialogue** node (a speech bubble with
+the name tag on its top-left edge, the styled text and the voice):
+
+```gdscript
+$Dialogue.say(preload("res://lines/hello_traveler.blab"))
+await $Dialogue.finished
+```
+
+Its **Use Voice**, **Use Text Style** and **Use Bubble Style** switches turn
+parts off so you can bring your own. Or use the parts directly:
+
+```gdscript
+var line: BlabberLine = load("res://lines/hello_traveler.blab")
+$Blabbermouth.speak(line.text, line.voice)                   # just the voice
+$MyLabel.text = line.bbcode                                    # just the styled text
+$MyPanel.add_theme_stylebox_override("panel", line.bubble)     # just the bubble
+line.bubble.style_label($MyPanel/MyLabel)                      # and its font
+```
+
+`BlabberVoiceFile.read()` on a line file gives the speaker's voice, and
+`BlabberLineFile.read(path, false)` skips an embedded font.
+
+### Sound files
+
+Bake a line once and use the sound anywhere, without Blabbermouth:
+
+```gdscript
+line.bake().save_to_wav("user://hello_traveler.wav")
+var times := line.word_timings()   # [{word, start, end}, ...] in seconds, for captions
+```
+
 ## How it works
 
 1. **Parser** (`blabber_parser.gd`): reads the tags, splits the text into
@@ -325,4 +393,6 @@ godot --headless --path . -s tools/test_samples.gd -- /tmp/out a.wav b.ogg  # im
 godot --headless --path . -s tools/test_voice_file.gd           # .blab files and the library (exits 1 on failure)
 godot --headless --path . -s tools/test_signals.gd              # finished / interrupted (exits 1 on failure)
 godot --headless --path . -s tools/test_g2p.gd                  # letters-to-sounds rules (exits 1 on failure)
+godot --headless --path . -s tools/test_lines.gd                # effects, line files, dialogue bubble (exits 1 on failure)
+godot --headless --path . -s tools/make_sample_line.gd          # regenerate demo/lines/hello_traveler.blab
 ```
