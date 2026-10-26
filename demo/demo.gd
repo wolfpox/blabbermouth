@@ -8,6 +8,7 @@ const Sheet := preload("res://demo/sheet.gd")
 const Cast := preload("res://demo/cast.gd")
 const LinePage := preload("res://demo/line_page.gd")
 const CastPage := preload("res://demo/cast_page.gd")
+const VocabularyPage := preload("res://demo/vocabulary_page.gd")
 const LibraryPanel := preload("res://demo/library_panel.gd")
 const SampleStudio := preload("res://demo/sample_studio.gd")
 
@@ -17,6 +18,8 @@ var save_path := Cast.SAVE_PATH
 var test_size := Vector2i.ZERO
 var members: Array = []
 var current := 0
+## Recorded words, shared by every character.
+var vocabulary := BlabberVocabulary.new()
 
 var margin: MarginContainer
 var header: BoxContainer
@@ -28,6 +31,7 @@ var scroll: ScrollContainer
 var pages: VBoxContainer
 var line_page: LinePage
 var cast_page: CastPage
+var vocabulary_page: VocabularyPage
 var voices_page: VBoxContainer
 var library: LibraryPanel
 var status: Label
@@ -42,6 +46,7 @@ var export_status: Label
 var export_note: Label
 var confirm: ConfirmationDialog
 var _sample_i := -1
+var _vocab_dirty := false
 var _save_timer: Timer
 var _dialog: FileDialog
 var _status_timer: Timer
@@ -90,6 +95,16 @@ func _ready() -> void:
 		line_page.refresh_speaker()
 		save_soon())
 
+	vocabulary_page = VocabularyPage.new()
+	vocabulary_page.get_member = member
+	vocabulary_page.get_members = func() -> Array: return members
+	pages.add_child(vocabulary_page)
+	vocabulary_page.changed.connect(func() -> void:
+		_vocab_dirty = true
+		line_page.refresh_speaker()
+		save_soon())
+	vocabulary_page.export_pressed.connect(_export_vocabulary)
+
 	voices_page = Ui.vbox(16)
 	pages.add_child(voices_page)
 	voices_page.add_child(Ui.heading("Voices", 26))
@@ -98,7 +113,11 @@ func _ready() -> void:
 	voices_page.add_child(lib_panel)
 	library = LibraryPanel.new()
 	library.handle_files = false
-	library.get_voice = func() -> BlabberVoice: return member().speaker.voice
+	library.get_voice = func() -> BlabberVoice:
+		# The vocabulary is kept and exported on its own page.
+		var v := BlabberVoiceFile.copy_voice(member().speaker.voice)
+		v.vocabulary = null
+		return v
 	library.get_name_hint = func() -> String: return member().speaker.display_name
 	library.opened.connect(_open_voice)
 	lib_panel.add_child(library)
@@ -120,16 +139,19 @@ func _ready() -> void:
 	_status_timer.timeout.connect(func() -> void: status.visible = false)
 	add_child(_status_timer)
 
+	vocabulary = Cast.load_vocabulary(Cast.vocabulary_path(save_path))
 	var st := Cast.load_state(save_path)
 	if st.is_empty():
 		members = Cast.defaults()
 		current = 0
+		Cast.attach_vocabulary(members, vocabulary)
 		line_page.set_member(members[0])
 		line_page.load_source(Cast.SAMPLES[0][1])
 		_sample_i = 0
 	else:
 		members = st.members
 		current = st.current
+		Cast.attach_vocabulary(members, vocabulary)
 		line_page.set_member(members[current])
 		line_page.load_source(st.line)
 	show_page("line")
@@ -169,7 +191,7 @@ func _header() -> Control:
 	top.add_child(brand)
 	nav = Ui.hbox(4)
 	var group := ButtonGroup.new()
-	for t in [["line", "Line"], ["cast", "Characters"], ["voices", "Voices"]]:
+	for t in [["line", "Line"], ["cast", "Characters"], ["vocabulary", "Vocabulary"], ["voices", "Voices"]]:
 		var b := Button.new()
 		b.text = t[1]
 		b.toggle_mode = true
@@ -196,11 +218,14 @@ func _header() -> Control:
 func show_page(page: String) -> void:
 	line_page.visible = page == "line"
 	cast_page.visible = page == "cast"
+	vocabulary_page.visible = page == "vocabulary"
 	voices_page.visible = page == "voices"
 	for k in tabs:
 		tabs[k].set_pressed_no_signal(k == page)
 	if page == "cast":
 		cast_page.show_cast(members, current)
+	elif page == "vocabulary":
+		vocabulary_page.show_vocabulary(vocabulary)
 	elif page == "line":
 		line_page.refresh_speaker()
 	scroll.scroll_vertical = 0
@@ -230,7 +255,7 @@ func _layout() -> void:
 	header.vertical = width < 760.0
 	nav.add_theme_constant_override("separation", 0 if phone else 4)
 	header.get_child(0).add_theme_constant_override("separation", 12 if phone else 28)
-	header.find_child("Title", true, false).visible = width >= 400.0
+	header.find_child("Title", true, false).visible = not phone
 	for t in tabs.values():
 		var st := Ui.box(Ui.CLEAR, 0, Ui.CLEAR, 0, 10 if phone else 16, 10)
 		t.add_theme_stylebox_override("normal", st)
@@ -243,6 +268,7 @@ func _layout() -> void:
 	var narrow := width < 1060.0
 	line_page.set_narrow(narrow, phone)
 	cast_page.set_narrow(width < 980.0, phone)
+	vocabulary_page.set_narrow(width < 980.0, phone)
 
 
 # --- Characters ----------------------------------------------------------------
@@ -252,11 +278,14 @@ func set_current(i: int) -> void:
 	line_page.set_member(member())
 	if cast_page.visible:
 		cast_page.show_cast(members, current)
+	if vocabulary_page.visible:
+		vocabulary_page.refresh()
 	save_soon()
 
 
 func _add_member() -> void:
 	var m := Cast.make_new(Cast.unique_name(members, "New character"), "man", members.size())
+	Cast.attach_vocabulary([m], vocabulary)
 	members.append(m)
 	set_current(members.size() - 1)
 	show_page("cast")
@@ -284,6 +313,7 @@ func _delete_member() -> void:
 
 func _open_voice(v: BlabberVoice, voice_name: String) -> void:
 	var m := member()
+	_take_words(v.vocabulary)
 	m.speaker.voice = v
 	if v.sample_bank:
 		m.recording = v.sample_bank
@@ -428,7 +458,7 @@ func _build_export() -> void:
 	var gv := Ui.vbox(10)
 	game.add_child(gv)
 	gv.add_child(Ui.heading("Line file for games (.blab)"))
-	gv.add_child(Ui.label("The words with their effects, plus a copy of the speaker: voice, bubble and font. A Godot project with the Blabbermouth plugin loads it as a BlabberLine, and can use the voice, the text styling and the bubble together or one at a time.", 14, Ui.DIM))
+	gv.add_child(Ui.label("The words with their effects, plus a copy of the speaker: voice, bubble, font, and the takes of any vocabulary words the line uses. A Godot project with the Blabbermouth plugin loads it as a BlabberLine, and can use the voice, the text styling and the bubble together or one at a time.", 14, Ui.DIM))
 	var code := Ui.label("$Dialogue.say(load(\"res://lines/my_line.blab\"))", 13, Ui.TEXT_2)
 	code.add_theme_font_override("font", Ui.FONT_MONO)
 	gv.add_child(code)
@@ -505,22 +535,40 @@ func _export_wav() -> void:
 	_save_bytes(bytes, _file_stem() + ".wav", "*.wav ; WAV sound", "audio/wav")
 
 
-func _save_bytes(bytes: PackedByteArray, file_name: String, filter: String, mime: String) -> void:
+## Saves or downloads a file. report shows what happened (the export sheet's status by default).
+func _save_bytes(bytes: PackedByteArray, file_name: String, filter: String, mime: String, report := Callable()) -> void:
+	if not report.is_valid():
+		report = func(t: String) -> void: export_status.text = t
 	if BlabberWeb.available():
 		BlabberWeb.download(bytes, file_name, mime)
-		export_status.text = "Downloaded %s." % file_name
+		report.call("Downloaded %s." % file_name)
 		return
 	var d := _file_dialog(FileDialog.FILE_MODE_SAVE_FILE, filter)
 	d.current_file = file_name
 	d.file_selected.connect(func(path: String) -> void:
 		var f := FileAccess.open(path, FileAccess.WRITE)
 		if f == null:
-			export_status.text = "Couldn't save %s (%s)." % [path.get_file(), error_string(FileAccess.get_open_error())]
+			report.call("Couldn't save %s (%s)." % [path.get_file(), error_string(FileAccess.get_open_error())])
 			return
 		f.store_buffer(bytes)
 		f.close()
-		export_status.text = "Saved " + path, CONNECT_ONE_SHOT)
+		report.call("Saved " + path), CONNECT_ONE_SHOT)
 	d.popup_centered_ratio(0.7)
+
+
+func _export_vocabulary() -> void:
+	_save_bytes(vocabulary.to_bytes("Vocabulary"), "vocabulary.blab", "*.blab ; Blabbermouth vocabulary", "application/json", _say)
+
+
+## Adds words from an opened file to the shared vocabulary. Returns how
+## many words (x) and takes (y) were new.
+func _take_words(from: BlabberVocabulary) -> Vector2i:
+	if from == null or from == vocabulary:
+		return Vector2i.ZERO
+	var n := Cast.merge_vocabulary(vocabulary, from)
+	if n != Vector2i.ZERO:
+		_vocab_dirty = true
+	return n
 
 
 func _file_dialog(mode: FileDialog.FileMode, filter: String) -> FileDialog:
@@ -555,8 +603,23 @@ func _open_path(path: String) -> void:
 
 
 ## Opens a .blab file: a line goes into the editor with its speaker added to
-## the characters; a voice file goes to the Voices page.
+## the characters; a voice file goes to the Voices page; a vocabulary's words
+## join the vocabulary.
 func open_line_bytes(bytes: PackedByteArray, file_name: String) -> void:
+	if BlabberVocabulary.is_vocabulary(bytes):
+		var vr := BlabberVocabulary.from_bytes(bytes)
+		if not vr.ok:
+			_say("%s: %s" % [file_name, vr.error])
+			return
+		var added := _take_words(vr.vocabulary)
+		show_page("vocabulary")
+		line_page.refresh_speaker()
+		save_soon()
+		if added == Vector2i.ZERO:
+			_say("Nothing new in %s: you have all its words and takes." % file_name)
+		else:
+			_say("Opened %s: %d new word%s and %d new take%s." % [file_name, added.x, "" if added.x == 1 else "s", added.y, "" if added.y == 1 else "s"])
+		return
 	if not BlabberLineFile.is_line(bytes):
 		show_page("voices")
 		library.import_bytes(bytes, file_name)
@@ -581,6 +644,8 @@ func open_line_bytes(bytes: PackedByteArray, file_name: String) -> void:
 				b.font_size = keep
 		m.kind = "man"
 		m.recording = m.speaker.voice.sample_bank
+		_take_words(m.speaker.voice.vocabulary)
+		m.vocabulary = vocabulary
 		m.set_use_recording(m.recording != null)
 		members.append(m)
 		current = members.size() - 1
@@ -628,6 +693,9 @@ func save_soon() -> void:
 func save_now() -> void:
 	_save_timer.stop()
 	var err := Cast.save_state(members, current, line_page.model.to_source(), save_path)
+	if err == OK and _vocab_dirty:
+		err = vocabulary.write(Cast.vocabulary_path(save_path), "Vocabulary")
+		_vocab_dirty = err != OK
 	if err != OK:
 		_say("Couldn't save your work on this device (%s)." % error_string(err))
 

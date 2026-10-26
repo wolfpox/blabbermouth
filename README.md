@@ -15,7 +15,8 @@ line, select words in the speaker's speech bubble and give them an effect
 (shout, whisper, shiver, wave, swell, bounce, droop, jolt, slow, fast, high,
 low, pause). The bubble shows the effect and the voice reads it that way.
 Switch the voice between the character's synth voice and your own recording,
-then export the line for a game or as a sound file.
+record real takes of words your game uses (its vocabulary), then export the
+line for a game or as a sound file.
 
 **Link:** https://wolfpox.github.io/blabbermouth/ (once Pages is turned on, see below).
 
@@ -74,13 +75,18 @@ The demo (`demo/`) is built around the speech bubble:
 - **Characters**: eight starting characters, each with a voice and a bubble
   style (font, colors, corners, outline, shadow, tail). Add, duplicate,
   rename or delete them, and record a voice for each one.
+- **Vocabulary**: words and phrases spoken with real recordings. Add a word,
+  record a take or two (or load a sound file), and every line that uses it
+  plays one of the takes in the speaker's pitch and size. **Hear** plays it
+  as the current character. Each character can switch the vocabulary off.
+  **Export vocabulary** saves every word as one `.blab` file for a game.
 - **Voices**: save voices on this device and move them between devices.
 - **Export**: a `.blab` line file (text, effects and a copy of the speaker,
   font included if you like) for Godot, or a `.wav` that plays anywhere.
   **Open** loads a line file back into the editor.
 
 Your characters and the current line are saved on the device as you work
-(`user://editor.json`). The bubble fonts in `demo/fonts/` are open-source
+(`user://editor.json`, and the vocabulary in `user://editor_vocabulary.blab`). The bubble fonts in `demo/fonts/` are open-source
 (SIL Open Font License, see `demo/fonts/licenses/`), so exported lines can
 carry them.
 
@@ -205,10 +211,74 @@ Notes:
 - Recordings are capped at 30 seconds. Use 5–15 seconds of varied syllables
   for the best results.
 
+## Vocabulary (real recorded words)
+
+Some words should sound real every time: a greeting, a name, a catchphrase,
+the words of an invented language. Put them in a **vocabulary**, record one
+or more **takes** of each, and whenever a line uses the word the voice plays
+one of its takes instead of synthesizing it. The rest of the line is spoken
+as usual, so you only record the words that matter.
+
+The takes are still shaped by the line:
+
+- **Pitch and size**: a take moves to the speaker's pitch and throat size,
+  so one recording can be said by a critter, a woman or a monster. It keeps
+  its own rise and fall, and follows the sentence melody on top (as much as
+  the voice's `sample_melody` says) and ends higher on a question.
+- **Speed**: the voice's speed, `[speed]`, slow and fast stretch or squeeze
+  the take without changing its pitch.
+- **Effects**: shout, whisper, high, low, `[pitch]`, `[volume]`, emotions,
+  shiver (vibrato), wave, swell, bounce, droop and jolt all apply. Jolt and
+  gruff voices add rasp and growl, and the robot's ring modulation applies too.
+- **Variety**: with more than one take, a line never plays the same take
+  twice in a row. The same line always picks the same takes, so baked audio
+  doesn't change.
+- **Phrases** of up to four words ("thank you", "good morning") work too.
+  Matching ignores case and punctuation, but punctuation between words
+  splits a phrase ("thank, you" isn't "thank you").
+
+Turn off `fit_to_voice` and takes keep the recorded voice: only what the line
+adds (effects, tags, melody) changes them. Takes are cut to 6 seconds, and a
+word has up to 8 takes. A take without a clear pitch (a whisper, a bark)
+can't follow the melody, so it is moved as a whole instead.
+
+In the demo, open **Vocabulary**: add a word, press **Record a take** and say
+it (recording stops by itself when you go quiet), or **Load file…**. The line
+page lists the line's recorded words under **How the voice reads it**.
+
+In code:
+
+```gdscript
+var vocab := BlabberVocabulary.new()
+vocab.add_take("hello", samples, 48000)        # from BlabberRecorder or BlabberAudioImport
+vocab.add_take("hello", other_samples, 48000)  # a second take, for variety
+vocab.add_take("thank you", more_samples, 48000)
+
+var voice := BlabberVoice.preset("goblin")
+voice.vocabulary = vocab                     # share it between as many voices as you like
+$Blabbermouth.speak("Hello! [shout]Thank you![/shout]", voice)
+```
+
+Save it with `vocab.write("user://words.blab")` and read it back with
+`BlabberVocabulary.read()`. With the plugin enabled, a vocabulary `.blab`
+file in your project imports as a `BlabberVocabulary`: set it as a voice's
+**Vocabulary** in the inspector, or load it in code:
+
+```gdscript
+var voice: BlabberVoice = preload("res://voices/goblin.blab").duplicate()
+voice.vocabulary = preload("res://voices/goblin_words.blab")
+```
+
+A voice file keeps its vocabulary, and a line file keeps the takes of the
+words that line uses, so an exported line sounds the same in any game.
+`BlabberParser.recorded_words(text, voice)` lists which words of a line will
+be recorded ones.
+
 ## Saving and sharing voices
 
 Voices are saved as `.blab` files: plain JSON text with the settings and,
-for recorded voices, the recording. A `.blab` file can't contain code, so
+for recorded voices, the recording (and a vocabulary's takes, if it has
+one). A `.blab` file can't contain code, so
 it's safe to open one someone else made. Don't share `.tres` or `.res`
 files with people you don't trust: Godot resources can run code when loaded.
 
@@ -407,6 +477,8 @@ var times := line.word_timings()   # [{word, start, end}, ...] in seconds, for c
    clicking.
 3. **Sampler** (`blabber_sampler.gd`): the alternative to the synth when a
    voice has a recording. It uses the same timeline, signals and lip-sync.
+   **Word player** (`blabber_word_player.gd`): mixes in the takes of
+   vocabulary words, for both, where the parser left room for them.
 4. **Node** (`blabbermouth.gd`): streams audio through an
    `AudioStreamGenerator` and fires signals at the moment each part is heard.
 
@@ -424,6 +496,7 @@ godot --headless --path . -s tools/test_voice_file.gd           # .blab files an
 godot --headless --path . -s tools/test_signals.gd              # finished / interrupted (exits 1 on failure)
 godot --headless --path . -s tools/test_g2p.gd                  # letters-to-sounds rules (exits 1 on failure)
 godot --headless --path . -s tools/test_lines.gd                # effects, line files, dialogue bubble (exits 1 on failure)
-godot --headless --path . -s tools/test_editor.gd               # the demo editor: formatting, characters, export (exits 1 on failure)
+godot --headless --path . -s tools/test_vocabulary.gd           # recorded words: matching, takes, effects, files (exits 1 on failure)
+godot --headless --path . -s tools/test_editor.gd               # the demo editor: formatting, characters, vocabulary, export (exits 1 on failure)
 godot --headless --path . -s tools/make_sample_line.gd          # regenerate demo/lines/hello_traveler.blab
 ```

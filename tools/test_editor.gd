@@ -1,6 +1,6 @@
 extends SceneTree
 ## Checks the demo editor: the line model, saved characters, and the editor
-## screen itself (select words, format them, play, export).
+## screen itself (select words, format them, play, export, the vocabulary).
 ## Exits with code 1 on failure.
 ## godot --headless --path . -s tools/test_editor.gd
 
@@ -22,6 +22,7 @@ func _init() -> void:
 	_test_edit_view()
 	_test_cast()
 	await _test_screen()
+	await _test_vocabulary_screen()
 	print("editor tests: ", "all passed" if failures == 0 else "%d failed" % failures)
 	quit(1 if failures > 0 else 0)
 
@@ -207,3 +208,94 @@ func _test_screen() -> void:
 	scene.queue_free()
 	await process_frame
 	DirAccess.remove_absolute("user://editor_test_scratch.json")
+
+
+func _baked(text: String, preset: String) -> PackedFloat32Array:
+	var wav := Blabbermouth.bake(text, BlabberVoice.preset(preset))
+	var out := PackedFloat32Array()
+	out.resize(wav.data.size() / 2)
+	for i in out.size():
+		out[i] = wav.data.decode_s16(i * 2) / 32768.0
+	return out
+
+
+func _test_vocabulary_screen() -> void:
+	var save := "user://editor_test_vocab.json"
+	DirAccess.remove_absolute(save)
+	DirAccess.remove_absolute(Cast.vocabulary_path(save))
+	var scene: Control = (load("res://demo/demo.tscn") as PackedScene).instantiate()
+	scene.save_path = save
+	scene.test_size = Vector2i(1280, 900)
+	root.add_child(scene)
+	for i in 4:
+		await process_frame
+	check(scene.members.all(func(m): return m.speaker.voice.vocabulary == scene.vocabulary), "every character shares the vocabulary")
+	scene.show_page("vocabulary")
+	var vp = scene.vocabulary_page
+	check(vp.visible and vp.empty_label.visible, "vocabulary page starts empty")
+	vp.add_edit.text = "Hello!"
+	vp._add()
+	check(scene.vocabulary.find("hello") != null and vp.open_key == "hello", "Add word adds and opens it")
+	check(vp._record_button != null and vp._load_button != null, "the open word can be recorded or loaded")
+	vp._add_audio("hello", _baked("Hello", "woman"), 22050, "")
+	check(scene.vocabulary.find("hello").takes.size() == 1, "a take is added")
+	check(vp.player.playing, "the new take is played in the character's voice")
+	vp._add_audio("hello", PackedFloat32Array([0.0, 0.0]), 22050, "")
+	check(scene.vocabulary.find("hello").takes.size() == 1 and vp.status.text.begins_with("Couldn't hear"), "silence is refused")
+	# The line page shows and plays it.
+	scene.show_page("line")
+	var page = scene.line_page
+	page.load_source("Hello there, [shout]hello![/shout]")
+	await process_frame
+	var rows := 0
+	for c in page.marks_box.get_children():
+		if not c.is_queued_for_deletion():
+			rows += 1
+	check(rows == 3, "the reads card lists the shout and two recorded words (%d)" % rows)
+	check(page.source_detail.text.contains("2 recorded words"), "voice source mentions them: " + page.source_detail.text)
+	page._update_bars()
+	var bytes: PackedByteArray = scene.line_file_bytes(false)
+	var lr := BlabberLineFile.from_bytes(bytes)
+	check(lr.ok and lr.line.voice.vocabulary != null and lr.line.voice.vocabulary.find("hello") != null, "the exported line carries its recorded word")
+	page.play_button.pressed.emit()
+	check(page.dialogue.is_speaking(), "plays a line with a recorded word")
+	for i in 3:
+		await process_frame
+	page.play_button.pressed.emit()
+	# One character switched off.
+	scene.set_current(2)
+	scene.member().set_use_vocabulary(false)
+	check(BlabberParser.recorded_words("Hello", scene.member().speaker.voice).is_empty(), "switched off, the voice says it itself")
+	scene._duplicate_member()
+	check(not scene.member().use_vocabulary and scene.member().vocabulary == scene.vocabulary, "a copy keeps the switch")
+	scene._add_member()
+	check(scene.member().speaker.voice.vocabulary == scene.vocabulary, "a new character gets the vocabulary")
+	# A vocabulary file adds its words.
+	var other := BlabberVocabulary.new()
+	other.add_take("goodbye", _baked("Goodbye", "man"), 22050)
+	other.add_clip("hello", scene.vocabulary.find("hello").takes[0])
+	scene.open_line_bytes(other.to_bytes(), "more.blab")
+	check(scene.vocabulary.find("goodbye") != null and scene.vocabulary.find("hello").takes.size() == 1, "opening a vocabulary adds new words, not repeats (%s, %d takes)" % [scene.vocabulary.find("goodbye"), scene.vocabulary.find("hello").takes.size()])
+	check(vp.visible, "and shows the vocabulary page")
+	# Saved and loaded again.
+	scene.save_now()
+	check(FileAccess.file_exists(Cast.vocabulary_path(save)), "the vocabulary is saved in its own file")
+	var n_members: int = scene.members.size()
+	scene.queue_free()
+	await process_frame
+	var again: Control = (load("res://demo/demo.tscn") as PackedScene).instantiate()
+	again.save_path = save
+	again.test_size = Vector2i(1280, 900)
+	root.add_child(again)
+	for i in 3:
+		await process_frame
+	check(again.vocabulary.find("hello") != null and again.vocabulary.find("goodbye") != null, "the vocabulary comes back")
+	check(again.members.size() == n_members and not again.members[2].use_vocabulary and again.members[2].speaker.voice.vocabulary == null, "the switch comes back")
+	check(again.members[0].speaker.voice.vocabulary == again.vocabulary, "the others use it again")
+	again.show_page("vocabulary")
+	again.vocabulary_page._remove(again.vocabulary.find("goodbye"))
+	check(again.vocabulary.find("goodbye") == null, "a word can be removed")
+	again.queue_free()
+	await process_frame
+	DirAccess.remove_absolute(save)
+	DirAccess.remove_absolute(Cast.vocabulary_path(save))

@@ -218,8 +218,8 @@ func _web_file_input() -> void:
 	if p is Control:
 		clip = (p as Control).get_global_rect()
 	BlabberWeb.place_file_input(load_button, load_button.is_visible_in_tree() and not recorder.recording and not _busy, clip)
-	if BlabberWeb.file_kind() != "audio":
-		return # A voice file for the library panel.
+	if BlabberWeb.file_kind() != "audio" or not BlabberWeb.file_from(load_button):
+		return # A voice file for the library panel, or a take for the vocabulary.
 	match BlabberWeb.state():
 		"decoding":
 			info.text = "Reading %s…" % BlabberWeb.file_name()

@@ -10,7 +10,7 @@ extends RefCounted
 
 const JS := """
 window.BlabberWeb = window.BlabberWeb || (function () {
-	const W = { state: 'idle', error: '', rate: 0, name: '', kind: 'audio', level: 0, recording: false, data: null, bytes: null, chunks: [], _overlays: {} };
+	const W = { state: 'idle', error: '', rate: 0, name: '', kind: 'audio', source: '', level: 0, recording: false, data: null, bytes: null, chunks: [], _overlays: {} };
 	const MAX_SECONDS = 30;
 	const MAX_BYTES = 16 * 1024 * 1024;
 	W.ctx = function () {
@@ -63,7 +63,7 @@ window.BlabberWeb = window.BlabberWeb || (function () {
 	// Opens the picker from code. Browsers may refuse this outside a real
 	// click on the page, so prefer placeFileInput().
 	W.pickFile = function () {
-		W.state = 'picking'; W.error = '';
+		W.state = 'picking'; W.error = ''; W.source = '';
 		const input = document.createElement('input');
 		input.type = 'file'; input.accept = ACCEPT; input.style.display = 'none';
 		document.body.appendChild(input);
@@ -92,7 +92,7 @@ window.BlabberWeb = window.BlabberWeb || (function () {
 			file.style.cssText = 'position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none;';
 			file.onchange = function () {
 				const f = file.files && file.files[0];
-				if (f) { if (kind === 'data') W.readFile(f); else W.decodeFile(f); }
+				if (f) { W.source = id; if (kind === 'data') W.readFile(f); else W.decodeFile(f); }
 				file.value = '';
 			};
 			input.appendChild(file);
@@ -248,6 +248,20 @@ static func reset() -> void:
 ## The file's name, once state() is "done".
 static func file_name() -> String:
 	return str(_js("window.BlabberWeb.name"))
+
+
+## True if the current state() is about a file picked with the input laid
+## over this Control (see place_file_input()). Use it when a page has more
+## than one file button, so each takes only its own file.
+static func file_from(control: Control) -> bool:
+	return file_source() == str(control.get_instance_id())
+
+
+## The instance id (as text) of the Control whose file input picked the
+## current file, or "" if it was opened from code.
+static func file_source() -> String:
+	var s = _js("window.BlabberWeb.source")
+	return str(s) if s != null else ""
 
 
 ## "audio" or "data": which kind of file the current state() is about.

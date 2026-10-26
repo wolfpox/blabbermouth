@@ -15,6 +15,8 @@ extends Node
 ## [whisper]...[/whisper]  [shout]...[/shout]  [reset]
 ## [shiver] [wave] [swell] [bounce] [droop] [jolt] ...[/name]
 ## [/codeblock]
+## Give the voice a [member BlabberVoice.vocabulary] and its words are
+## spoken with real recordings, fitted to the voice and the tags.
 ## Emotions: happy, excited, angry, sad, scared. Effects, an emotion and
 ## whisper or shout can all be combined. On a RichTextLabel the effects,
 ## emotions, whisper and shout also show in the text (see [member text_effects]).
@@ -148,8 +150,9 @@ static func strip_tags(text: String) -> String:
 
 
 ## Renders a line to an AudioStreamWAV, e.g. to cache lines or save with save_to_wav().
-static func bake(text: String, p_voice: BlabberVoice, p_sample_rate: int = 22050) -> AudioStreamWAV:
-	var plan := BlabberParser.build(text, p_voice)
+## take picks which recording of vocabulary words to use (-1: each word chooses).
+static func bake(text: String, p_voice: BlabberVoice, p_sample_rate: int = 22050, take := -1) -> AudioStreamWAV:
+	var plan := BlabberParser.build(text, p_voice, take)
 	var synth := BlabberEngine.create(plan.segments, p_voice, p_sample_rate)
 	var samples := synth.render_all()
 	var data := PackedByteArray()
