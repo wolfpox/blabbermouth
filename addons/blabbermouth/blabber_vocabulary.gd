@@ -13,13 +13,16 @@ extends Resource
 ## var vocab := BlabberVocabulary.new()
 ## vocab.add_take("hello", recorded_samples, 48000)
 ## var voice := BlabberVoice.preset("goblin")
-## voice.vocabulary = vocab
+## voice.vocabularies = [vocab]
 ## $Blabbermouth.speak("Hello, stranger!", voice)   # "Hello" is the recording
 ## [/codeblock]
-## One vocabulary can be shared by many voices, and each says the words in
-## its own pitch and size. Save it as a .blab file with write() (or
-## BlabberVoiceFile, inside a voice); with the plugin enabled a vocabulary
-## .blab in your project imports as a BlabberVocabulary.
+## A vocabulary is one set of recordings, such as one actor's session or
+## "goblin grunts". One set can be shared by many voices, and each says the
+## words in its own pitch and size. A voice can also use several sets: the
+## first set that has a word wins, so a character's own recordings can go in
+## front of a shared set ([code][grunk_words, goblin_words][/code]).
+## Save a set as a .blab file with write(); with the plugin enabled a
+## vocabulary .blab in your project imports as a BlabberVocabulary.
 
 const FORMAT := 1 ## Bumped when the layout changes in a way old versions can't read.
 const MAX_WORDS := 2000
@@ -104,6 +107,13 @@ func remove_word(text: String) -> void:
 		emit_changed()
 
 
+## The name for this set's file: "Goblin words" -> "Goblin words.blab".
+## Voice files that link to a set (instead of carrying a copy) use it.
+func file_name() -> String:
+	var n := BlabberVoiceFile.clean_name(resource_name)
+	return (n if n != "" else "Vocabulary") + ".blab"
+
+
 ## Words with at least one take, by key.
 func lookup() -> Dictionary:
 	var out := {}
@@ -116,16 +126,50 @@ func lookup() -> Dictionary:
 	return out
 
 
+## Words with at least one take across several sets, by key, where the
+## first set that has a word wins: {key: {"word": BlabberWord, "vocabulary": BlabberVocabulary}}.
+static func lookup_sets(sets: Array) -> Dictionary:
+	var out := {}
+	for vs in sets:
+		if not vs is BlabberVocabulary:
+			continue
+		var found: Dictionary = vs.lookup()
+		for k in found:
+			if not out.has(k):
+				out[k] = {"word": found[k], "vocabulary": vs}
+	return out
+
+
 ## A vocabulary with only the words this line uses (sharing their takes).
 func only_used_in(text: String) -> BlabberVocabulary:
-	var v := BlabberVocabulary.new()
-	v.fit_to_voice = fit_to_voice
-	var seen := {}
-	for m in BlabberParser.recorded_words(text, self):
-		if not seen.has(m.key):
-			seen[m.key] = true
-			v.words.append(m.word)
-	return v
+	var trimmed := used_in([self], text)
+	if trimmed.is_empty():
+		var v := BlabberVocabulary.new()
+		v.fit_to_voice = fit_to_voice
+		v.resource_name = resource_name
+		return v
+	return trimmed[0]
+
+
+## For a line file: the sets this line takes words from, in the same order,
+## each with only the words it supplies (sharing their takes).
+static func used_in(sets: Array, text: String) -> Array[BlabberVocabulary]:
+	var by_set := {}
+	for m in BlabberParser.recorded_words(text, sets):
+		if not by_set.has(m.vocabulary):
+			by_set[m.vocabulary] = {}
+		by_set[m.vocabulary][m.key] = m.word
+	var out: Array[BlabberVocabulary] = []
+	for vs in sets:
+		if not by_set.has(vs):
+			continue
+		var v := BlabberVocabulary.new()
+		v.fit_to_voice = vs.fit_to_voice
+		v.resource_name = vs.resource_name
+		for k in by_set[vs]:
+			v.words.append(by_set[vs][k])
+		out.append(v)
+	return out
 
 
 # --- Files --------------------------------------------------------------------
@@ -141,7 +185,7 @@ func to_dict() -> Dictionary:
 			if c and not c.audio.is_empty():
 				takes.append(_clip_to_dict(c))
 		list.append({"text": w.text.left(MAX_TEXT), "takes": takes})
-	return {"fit_to_voice": fit_to_voice, "words": list}
+	return {"name": BlabberVoiceFile.clean_name(resource_name), "fit_to_voice": fit_to_voice, "words": list}
 
 
 ## Rebuilds a vocabulary from to_dict() values, checking everything.
@@ -150,6 +194,8 @@ static func from_dict(d) -> Dictionary:
 	if typeof(d) != TYPE_DICTIONARY or typeof(d.get("words")) != TYPE_ARRAY:
 		return _fail("The recorded words in this file are damaged.")
 	var v := BlabberVocabulary.new()
+	if typeof(d.get("name")) == TYPE_STRING:
+		v.resource_name = BlabberVoiceFile.clean_name(d.name)
 	if typeof(d.get("fit_to_voice")) == TYPE_BOOL:
 		v.fit_to_voice = d.fit_to_voice
 	if d.words.size() > MAX_WORDS:
@@ -172,8 +218,10 @@ static func from_dict(d) -> Dictionary:
 
 ## The file contents for a vocabulary on its own.
 func to_bytes(vocab_name := "") -> PackedByteArray:
-	var data := {"blabbermouth_vocabulary": FORMAT, "name": BlabberVoiceFile.clean_name(vocab_name if vocab_name != "" else resource_name)}
+	var data := {"blabbermouth_vocabulary": FORMAT}
 	data.merge(to_dict())
+	if vocab_name != "":
+		data.name = BlabberVoiceFile.clean_name(vocab_name)
 	return JSON.stringify(data, "\t").to_utf8_buffer()
 
 
@@ -188,10 +236,7 @@ static func from_bytes(bytes: PackedByteArray) -> Dictionary:
 		return _fail("This isn't a Blabbermouth vocabulary file.")
 	if int(version) > FORMAT:
 		return _fail("This vocabulary was made with a newer version of Blabbermouth.")
-	var r := from_dict(data)
-	if r.ok:
-		r.vocabulary.resource_name = BlabberVoiceFile.clean_name(str(data.get("name", "")))
-	return r
+	return from_dict(data)
 
 
 ## True if file contents are a vocabulary (rather than a voice or a line).

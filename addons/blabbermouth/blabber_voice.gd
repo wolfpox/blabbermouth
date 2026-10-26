@@ -97,9 +97,11 @@ const EMOTIONS := {
 @export_range(0.0, 1.0, 0.01) var sample_melody := 0.8
 ## How many similar-sounding syllables to choose between. Higher = more varied.
 @export_range(1, 8, 1) var sample_variety := 3
-## Words and phrases spoken with real recordings, in this voice's pitch and size.
-## Can be shared by several voices.
-@export var vocabulary: BlabberVocabulary
+## Sets of words and phrases spoken with real recordings, in this voice's
+## pitch and size. When more than one set has a word, the first one wins, so
+## put a character's own recordings before a set it shares with others.
+## A set can be shared by any number of voices.
+@export var vocabularies: Array[BlabberVocabulary] = []
 
 @export_group("Effects")
 ## Ring modulation for robots. 0 = off.

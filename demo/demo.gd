@@ -18,8 +18,8 @@ var save_path := Cast.SAVE_PATH
 var test_size := Vector2i.ZERO
 var members: Array = []
 var current := 0
-## Recorded words, shared by every character.
-var vocabulary := BlabberVocabulary.new()
+## Sets of recorded words (vocabularies). Each character uses some of them.
+var sets: Array = []
 
 var margin: MarginContainer
 var header: BoxContainer
@@ -46,7 +46,10 @@ var export_status: Label
 var export_note: Label
 var confirm: ConfirmationDialog
 var _sample_i := -1
-var _vocab_dirty := false
+## Sets changed since they were last saved.
+var _dirty_sets := {}
+## The sets came from an older version's one vocabulary file, removed once they're saved.
+var _migrated := false
 var _save_timer: Timer
 var _dialog: FileDialog
 var _status_timer: Timer
@@ -99,11 +102,20 @@ func _ready() -> void:
 	vocabulary_page.get_member = member
 	vocabulary_page.get_members = func() -> Array: return members
 	pages.add_child(vocabulary_page)
-	vocabulary_page.changed.connect(func() -> void:
-		_vocab_dirty = true
+	vocabulary_page.changed.connect(func(vs: BlabberVocabulary) -> void:
+		if vs:
+			_dirty_sets[vs] = true
 		line_page.refresh_speaker()
 		save_soon())
-	vocabulary_page.export_pressed.connect(_export_vocabulary)
+	vocabulary_page.deleted.connect(func(vs: BlabberVocabulary) -> void:
+		_dirty_sets.erase(vs)
+		Cast.delete_set_file(vs, save_path)
+		Cast.forget_id(vs)
+		line_page.refresh_speaker()
+		save_soon())
+	vocabulary_page.export_pressed.connect(_export_set)
+	line_page.aside.get_sets = func() -> Array: return sets
+	cast_page.editor.get_sets = func() -> Array: return sets
 
 	voices_page = Ui.vbox(16)
 	pages.add_child(voices_page)
@@ -113,11 +125,8 @@ func _ready() -> void:
 	voices_page.add_child(lib_panel)
 	library = LibraryPanel.new()
 	library.handle_files = false
-	library.get_voice = func() -> BlabberVoice:
-		# The vocabulary is kept and exported on its own page.
-		var v := BlabberVoiceFile.copy_voice(member().speaker.voice)
-		v.vocabulary = null
-		return v
+	library.get_voice = func() -> BlabberVoice: return BlabberVoiceFile.copy_voice(member().speaker.voice)
+	library.resolve_sets = _resolve_links
 	library.get_name_hint = func() -> String: return member().speaker.display_name
 	library.opened.connect(_open_voice)
 	lib_panel.add_child(library)
@@ -139,21 +148,28 @@ func _ready() -> void:
 	_status_timer.timeout.connect(func() -> void: status.visible = false)
 	add_child(_status_timer)
 
-	vocabulary = Cast.load_vocabulary(Cast.vocabulary_path(save_path))
 	var st := Cast.load_state(save_path)
-	if st.is_empty():
+	sets = st.sets
+	_migrated = st.migrated
+	if _migrated:
+		for vs in sets:
+			_dirty_sets[vs] = true
+	if not st.has("members"):
 		members = Cast.defaults()
 		current = 0
-		Cast.attach_vocabulary(members, vocabulary)
+		for m in members:
+			for vs in sets:
+				m.set_uses(vs, true)
 		line_page.set_member(members[0])
 		line_page.load_source(Cast.SAMPLES[0][1])
 		_sample_i = 0
 	else:
 		members = st.members
 		current = st.current
-		Cast.attach_vocabulary(members, vocabulary)
 		line_page.set_member(members[current])
 		line_page.load_source(st.line)
+	if _migrated:
+		save_soon()
 	show_page("line")
 	get_window().size_changed.connect(_layout)
 	get_window().files_dropped.connect(_on_files_dropped)
@@ -225,7 +241,7 @@ func show_page(page: String) -> void:
 	if page == "cast":
 		cast_page.show_cast(members, current)
 	elif page == "vocabulary":
-		vocabulary_page.show_vocabulary(vocabulary)
+		vocabulary_page.show_sets(sets)
 	elif page == "line":
 		line_page.refresh_speaker()
 	scroll.scroll_vertical = 0
@@ -285,7 +301,9 @@ func set_current(i: int) -> void:
 
 func _add_member() -> void:
 	var m := Cast.make_new(Cast.unique_name(members, "New character"), "man", members.size())
-	Cast.attach_vocabulary([m], vocabulary)
+	# Sets every character uses are for new ones too.
+	m.sets = Cast.shared_sets(members, sets)
+	m.apply_sets()
 	members.append(m)
 	set_current(members.size() - 1)
 	show_page("cast")
@@ -313,7 +331,9 @@ func _delete_member() -> void:
 
 func _open_voice(v: BlabberVoice, voice_name: String) -> void:
 	var m := member()
-	_take_words(v.vocabulary)
+	var got := _adopt_sets(v)
+	if not v.vocabularies.is_empty():
+		m.sets = got.sets # A voice without sets keeps the character's.
 	m.speaker.voice = v
 	if v.sample_bank:
 		m.recording = v.sample_bank
@@ -322,7 +342,7 @@ func _open_voice(v: BlabberVoice, voice_name: String) -> void:
 		m.set_use_recording(false)
 	line_page.refresh_speaker()
 	save_soon()
-	_say("%s now speaks with “%s”." % [m.speaker.display_name, voice_name])
+	_say("%s now speaks with “%s”.%s" % [m.speaker.display_name, voice_name, _sets_note(got)])
 
 
 func _next_sample() -> void:
@@ -556,19 +576,77 @@ func _save_bytes(bytes: PackedByteArray, file_name: String, filter: String, mime
 	d.popup_centered_ratio(0.7)
 
 
-func _export_vocabulary() -> void:
-	_save_bytes(vocabulary.to_bytes("Vocabulary"), "vocabulary.blab", "*.blab ; Blabbermouth vocabulary", "application/json", _say)
+func _export_set(vs: BlabberVocabulary) -> void:
+	if vs:
+		_save_bytes(vs.to_bytes(), vs.file_name(), "*.blab ; Blabbermouth vocabulary", "application/json", _say)
 
 
-## Adds words from an opened file to the shared vocabulary. Returns how
-## many words (x) and takes (y) were new.
-func _take_words(from: BlabberVocabulary) -> Vector2i:
-	if from == null or from == vocabulary:
-		return Vector2i.ZERO
-	var n := Cast.merge_vocabulary(vocabulary, from)
+## A set from an opened file joins the sets: its words and takes go into the
+## set with the same name, or it becomes a new set.
+## Returns {set, added (new words x, new takes y), new}.
+func _adopt_set(from: BlabberVocabulary) -> Dictionary:
+	if sets.has(from):
+		return {"set": from, "added": Vector2i.ZERO, "new": false}
+	var set_name := from.resource_name if from.resource_name != "" else Cast.DEFAULT_SET_NAME
+	var have := Cast.set_named(sets, set_name)
+	if have == null:
+		from.resource_name = Cast.unique_set_name(sets, set_name)
+		Cast.forget_id(from)
+		Cast.give_id(from, sets)
+		sets.append(from)
+		_dirty_sets[from] = true
+		return {"set": from, "added": Vector2i(from.words.size(), 0), "new": true}
+	var n := Cast.merge_vocabulary(have, from)
 	if n != Vector2i.ZERO:
-		_vocab_dirty = true
-	return n
+		_dirty_sets[have] = true
+	return {"set": have, "added": n, "new": false}
+
+
+## The sets an opened voice uses, as the editor's sets: copies join them
+## (see _adopt_set()) and links are matched by name.
+## Returns {sets, missing (names of linked sets the editor doesn't have), new_sets}.
+func _adopt_sets(v: BlabberVoice) -> Dictionary:
+	var out: Array = []
+	var missing: PackedStringArray = []
+	var new_sets := 0
+	for vs in v.vocabularies:
+		var got: BlabberVocabulary = null
+		if BlabberVoiceFile.is_link(vs):
+			got = Cast.set_named(sets, vs.resource_name if vs.resource_name != "" else BlabberVoiceFile.link_of(vs).get_basename())
+			if got == null:
+				missing.append(vs.resource_name)
+		else:
+			var r := _adopt_set(vs)
+			got = r.set
+			new_sets += 1 if r.new else 0
+		if got and not out.has(got):
+			out.append(got)
+	v.vocabularies.assign(out)
+	return {"sets": out, "missing": missing, "new_sets": new_sets}
+
+
+## For the Voices page: a voice with its linked sets replaced by the editor's.
+func _resolve_links(v: BlabberVoice) -> BlabberVoice:
+	var c := BlabberVoiceFile.copy_voice(v)
+	var out: Array = []
+	for vs in c.vocabularies:
+		var got: BlabberVocabulary = vs
+		if BlabberVoiceFile.is_link(vs):
+			got = Cast.set_named(sets, vs.resource_name)
+		if got:
+			out.append(got)
+	c.vocabularies.assign(out)
+	return c
+
+
+## What happened to an opened voice's sets, for the status line.
+func _sets_note(got: Dictionary) -> String:
+	var note := ""
+	if got.new_sets > 0:
+		note += " Its recorded words are in %s on the Vocabulary page." % ("a new set" if got.new_sets == 1 else "%d new sets" % got.new_sets)
+	if not got.missing.is_empty():
+		note += " It uses recorded words you don't have here (%s): open that set's file to add them." % ", ".join(got.missing)
+	return note
 
 
 func _file_dialog(mode: FileDialog.FileMode, filter: String) -> FileDialog:
@@ -586,7 +664,7 @@ func _file_dialog(mode: FileDialog.FileMode, filter: String) -> FileDialog:
 func _open_pressed() -> void:
 	if BlabberWeb.available():
 		return # The file input laid over the button opens the picker.
-	var d := _file_dialog(FileDialog.FILE_MODE_OPEN_FILE, "*.blab ; Blabbermouth line or voice")
+	var d := _file_dialog(FileDialog.FILE_MODE_OPEN_FILE, "*.blab ; Blabbermouth line, voice or vocabulary")
 	d.file_selected.connect(_open_path, CONNECT_ONE_SHOT)
 	d.popup_centered_ratio(0.7)
 
@@ -603,22 +681,31 @@ func _open_path(path: String) -> void:
 
 
 ## Opens a .blab file: a line goes into the editor with its speaker added to
-## the characters; a voice file goes to the Voices page; a vocabulary's words
-## join the vocabulary.
+## the characters; a voice file goes to the Voices page; a vocabulary file
+## joins the sets of recorded words.
 func open_line_bytes(bytes: PackedByteArray, file_name: String) -> void:
 	if BlabberVocabulary.is_vocabulary(bytes):
 		var vr := BlabberVocabulary.from_bytes(bytes)
 		if not vr.ok:
 			_say("%s: %s" % [file_name, vr.error])
 			return
-		var added := _take_words(vr.vocabulary)
+		var vs: BlabberVocabulary = vr.vocabulary
+		if vs.resource_name == "":
+			vs.resource_name = BlabberVoiceFile.clean_name(file_name.get_basename())
+		var r := _adopt_set(vs)
+		if r.new:
+			member().set_uses(r.set, true)
 		show_page("vocabulary")
+		vocabulary_page.show_sets(sets, r.set)
 		line_page.refresh_speaker()
 		save_soon()
-		if added == Vector2i.ZERO:
-			_say("Nothing new in %s: you have all its words and takes." % file_name)
+		var added: Vector2i = r.added
+		if r.new:
+			_say("Opened “%s” as a new set with %d word%s, used by %s. Choose who else uses it below." % [r.set.resource_name, added.x, "" if added.x == 1 else "s", member().speaker.display_name])
+		elif added == Vector2i.ZERO:
+			_say("Nothing new in %s: “%s” has all its words and takes." % [file_name, r.set.resource_name])
 		else:
-			_say("Opened %s: %d new word%s and %d new take%s." % [file_name, added.x, "" if added.x == 1 else "s", added.y, "" if added.y == 1 else "s"])
+			_say("Added %s to “%s”: %d new word%s and %d new take%s." % [file_name, r.set.resource_name, added.x, "" if added.x == 1 else "s", added.y, "" if added.y == 1 else "s"])
 		return
 	if not BlabberLineFile.is_line(bytes):
 		show_page("voices")
@@ -644,8 +731,7 @@ func open_line_bytes(bytes: PackedByteArray, file_name: String) -> void:
 				b.font_size = keep
 		m.kind = "man"
 		m.recording = m.speaker.voice.sample_bank
-		_take_words(m.speaker.voice.vocabulary)
-		m.vocabulary = vocabulary
+		m.sets = _adopt_sets(m.speaker.voice).sets
 		m.set_use_recording(m.recording != null)
 		members.append(m)
 		current = members.size() - 1
@@ -692,10 +778,17 @@ func save_soon() -> void:
 
 func save_now() -> void:
 	_save_timer.stop()
-	var err := Cast.save_state(members, current, line_page.model.to_source(), save_path)
-	if err == OK and _vocab_dirty:
-		err = vocabulary.write(Cast.vocabulary_path(save_path), "Vocabulary")
-		_vocab_dirty = err != OK
+	var err := Cast.save_state(members, current, line_page.model.to_source(), save_path, sets)
+	for vs in _dirty_sets.keys():
+		if err != OK:
+			break
+		if sets.has(vs):
+			err = Cast.save_set(vs, save_path)
+		if err == OK:
+			_dirty_sets.erase(vs)
+	if err == OK and _migrated:
+		DirAccess.remove_absolute(Cast.old_vocabulary_path(save_path))
+		_migrated = false
 	if err != OK:
 		_say("Couldn't save your work on this device (%s)." % error_string(err))
 

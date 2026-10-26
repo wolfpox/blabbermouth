@@ -68,14 +68,15 @@ static func unique_name(voice_name: String) -> String:
 
 
 ## Saves a voice, replacing any saved voice with the same name.
-## Returns {ok, path, name, error}.
-static func save(voice: BlabberVoice, voice_name: String) -> Dictionary:
+## link_sets: keep links to the voice's vocabularies instead of copies
+## (see BlabberVoiceFile.write()). Returns {ok, path, name, error}.
+static func save(voice: BlabberVoice, voice_name: String, link_sets := false) -> Dictionary:
 	var err := DirAccess.make_dir_recursive_absolute(folder)
 	if err != OK:
 		return {"ok": false, "path": "", "name": "", "error": "Could not make the voices folder (%s)." % error_string(err)}
 	var path := path_for(voice_name)
 	var n := path.get_file().get_basename()
-	err = BlabberVoiceFile.write(voice, path, n)
+	err = BlabberVoiceFile.write(voice, path, n, link_sets)
 	if err != OK:
 		return {"ok": false, "path": path, "name": n, "error": "Could not save %s (%s)." % [n, error_string(err)]}
 	return {"ok": true, "path": path, "name": n, "error": ""}

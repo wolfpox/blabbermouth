@@ -15,8 +15,9 @@ line, select words in the speaker's speech bubble and give them an effect
 (shout, whisper, shiver, wave, swell, bounce, droop, jolt, slow, fast, high,
 low, pause). The bubble shows the effect and the voice reads it that way.
 Switch the voice between the character's synth voice and your own recording,
-record real takes of words your game uses (its vocabulary), then export the
-line for a game or as a sound file.
+record real takes of words your game uses (sets of recorded words that
+characters share or keep to themselves), then export the line for a game or
+as a sound file.
 
 **Link:** https://wolfpox.github.io/blabbermouth/ (once Pages is turned on, see below).
 
@@ -75,18 +76,20 @@ The demo (`demo/`) is built around the speech bubble:
 - **Characters**: eight starting characters, each with a voice and a bubble
   style (font, colors, corners, outline, shadow, tail). Add, duplicate,
   rename or delete them, and record a voice for each one.
-- **Vocabulary**: words and phrases spoken with real recordings. Add a word,
-  record a take or two (or load a sound file), and every line that uses it
-  plays one of the takes in the speaker's pitch and size. **Hear** plays it
-  as the current character. Each character can switch the vocabulary off.
-  **Export vocabulary** saves every word as one `.blab` file for a game.
+- **Vocabulary**: words and phrases spoken with real recordings, kept in
+  sets. Make a set, add a word, record a take or two (or load a sound file),
+  and choose who uses the set: every line that uses the word plays one of the
+  takes in the speaker's pitch and size. **Hear** plays it as the current
+  character. A character can use several sets; on the **Characters** page
+  you pick them and put them in order. **Export set** saves one set as a
+  `.blab` file for a game.
 - **Voices**: save voices on this device and move them between devices.
 - **Export**: a `.blab` line file (text, effects and a copy of the speaker,
   font included if you like) for Godot, or a `.wav` that plays anywhere.
   **Open** loads a line file back into the editor.
 
 Your characters and the current line are saved on the device as you work
-(`user://editor.json`, and the vocabulary in `user://editor_vocabulary.blab`). The bubble fonts in `demo/fonts/` are open-source
+(`user://editor.json`, and each set of recorded words in `user://editor_sets/`). The bubble fonts in `demo/fonts/` are open-source
 (SIL Open Font License, see `demo/fonts/licenses/`), so exported lines can
 carry them.
 
@@ -219,6 +222,24 @@ or more **takes** of each, and whenever a line uses the word the voice plays
 one of its takes instead of synthesizing it. The rest of the line is spoken
 as usual, so you only record the words that matter.
 
+A vocabulary is one **set** of recordings: one actor's session, "goblin
+grunts", a character's catchphrases. Keep each set in its own file, and give
+each voice the sets it uses:
+
+- **Shared**: many voices use the same set. Each says the takes in its own
+  pitch and size, so one recording session covers a whole crowd.
+- **Separate**: a character with its own actor gets its own set.
+- **Layered**: a voice can use several sets, and the first one that has a
+  word wins. Put a character's own recordings in front of a shared set, and
+  it falls back to the shared takes for words its actor didn't record (and
+  to its voice for words no set has). You can start with one shared set and
+  replace words one character at a time.
+
+```
+Grunk:      [Grunk's words] → [Goblin words] → [Monster grunts]
+Goblin #4:  [Goblin words] → [Monster grunts]
+```
+
 The takes are still shaped by the line:
 
 - **Pitch and size**: a take moves to the speaker's pitch and throat size,
@@ -237,13 +258,16 @@ The takes are still shaped by the line:
   Matching ignores case and punctuation, but punctuation between words
   splits a phrase ("thank, you" isn't "thank you").
 
-Turn off `fit_to_voice` and takes keep the recorded voice: only what the line
-adds (effects, tags, melody) changes them. Takes are cut to 6 seconds, and a
+Turn off a set's `fit_to_voice` and its takes keep the recorded voice: only
+what the line adds (effects, tags, melody) changes them. That suits a set
+recorded by the character's own actor; a shared set usually leaves it on. Takes are cut to 6 seconds, and a
 word has up to 8 takes. A take without a clear pitch (a whisper, a bark)
 can't follow the melody, so it is moved as a whole instead.
 
-In the demo, open **Vocabulary**: add a word, press **Record a take** and say
-it (recording stops by itself when you go quiet), or **Load file…**. The line
+In the demo, open **Vocabulary**: make a set, add a word, press **Record a
+take** and say it (recording stops by itself when you go quiet), or **Load
+file…**, and pick who uses the set under **Used by**. Each character's
+settings list the sets it uses, with arrows to change their order. The line
 page lists the line's recorded words under **How the voice reads it**.
 
 In code:
@@ -255,30 +279,37 @@ vocab.add_take("hello", other_samples, 48000)  # a second take, for variety
 vocab.add_take("thank you", more_samples, 48000)
 
 var voice := BlabberVoice.preset("goblin")
-voice.vocabulary = vocab                     # share it between as many voices as you like
+voice.vocabularies = [vocab]                 # share it between as many voices as you like
 $Blabbermouth.speak("Hello! [shout]Thank you![/shout]", voice)
 ```
 
-Save it with `vocab.write("user://words.blab")` and read it back with
+Save a set with `vocab.write("user://words.blab")` and read it back with
 `BlabberVocabulary.read()`. With the plugin enabled, a vocabulary `.blab`
-file in your project imports as a `BlabberVocabulary`: set it as a voice's
-**Vocabulary** in the inspector, or load it in code:
+file in your project imports as a `BlabberVocabulary`: add it to a voice's
+**Vocabularies** in the inspector, or in code:
 
 ```gdscript
-var voice: BlabberVoice = preload("res://voices/goblin.blab").duplicate()
-voice.vocabulary = preload("res://voices/goblin_words.blab")
+var voice: BlabberVoice = preload("res://voices/grunk.blab").duplicate()
+voice.vocabularies = [preload("res://words/grunk_words.blab"), preload("res://words/goblin_words.blab")]
 ```
 
-A voice file keeps its vocabulary, and a line file keeps the takes of the
-words that line uses, so an exported line sounds the same in any game.
+A voice file either carries copies of its sets, so it works on its own, or
+links to them by file name (`BlabberVoiceFile.write(voice, path, name, true)`,
+or turn off **Exports carry copies of the recorded words** on the Voices
+page). A linked set is loaded from the voice file's folder, so keep the set
+files next to it: voices that link to the same set share one file, and in
+Godot one loaded copy. A voice whose set file is missing still works, without
+those words (`BlabberVoiceFile.missing_sets(voice)` names them, and the
+importer warns). A line file always carries the takes of the words that line
+uses, so an exported line sounds the same in any game.
 `BlabberParser.recorded_words(text, voice)` lists which words of a line will
-be recorded ones.
+be recorded ones, and which set each comes from.
 
 ## Saving and sharing voices
 
 Voices are saved as `.blab` files: plain JSON text with the settings and,
-for recorded voices, the recording (and a vocabulary's takes, if it has
-one). A `.blab` file can't contain code, so
+for recorded voices, the recording (and its sets of recorded words, copied
+or linked). A `.blab` file can't contain code, so
 it's safe to open one someone else made. Don't share `.tres` or `.res`
 files with people you don't trust: Godot resources can run code when loaded.
 

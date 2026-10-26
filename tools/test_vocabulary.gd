@@ -21,6 +21,7 @@ func _init() -> void:
 	_test_plan(vocab)
 	_test_sound(vocab)
 	_test_files(vocab)
+	_test_sets(vocab)
 	await _test_node(vocab)
 	print("vocabulary tests: ", "all passed" if failures == 0 else "%d failed" % failures)
 	quit(1 if failures > 0 else 0)
@@ -69,7 +70,7 @@ func _test_matching(vocab: BlabberVocabulary) -> void:
 	check(BlabberParser.recorded_words("[shout]Hello[/shout] [wave]thank you[/wave]", vocab).size() == 2, "tags don't get in the way")
 	var voice := BlabberVoice.preset("man")
 	check(BlabberParser.recorded_words("Hello", voice).is_empty(), "a voice without a vocabulary says nothing recorded")
-	voice.vocabulary = vocab
+	voice.vocabularies = [vocab]
 	check(BlabberParser.recorded_words("Hello", voice).size() == 1, "a voice's vocabulary is used")
 	var empty := BlabberVocabulary.new()
 	empty.add_word("hello")
@@ -83,7 +84,7 @@ func _heads(segs: Array) -> Array:
 func _test_plan(vocab: BlabberVocabulary) -> void:
 	var voice := BlabberVoice.preset("goblin")
 	voice.mode = BlabberVoice.Mode.GIBBERISH
-	voice.vocabulary = vocab
+	voice.vocabularies = [vocab]
 	var text := "Hello, hello, hello! Hello, hello? Thank you."
 	var plan := BlabberParser.build(text, voice)
 	var heads := _heads(plan.segments)
@@ -124,7 +125,7 @@ func _test_sound(vocab: BlabberVocabulary) -> void:
 		var v := BlabberVoice.preset(preset)
 		v.pitch_variation = 0.0
 		v.intonation = 0.0
-		v.vocabulary = vocab
+		v.vocabularies = [vocab]
 		var out := _render("Hello", v)
 		var p := _pitch(out)
 		check(absf(p / v.pitch - 1.0) < 0.15, "%s says the take at their pitch (%.0f Hz, voice %.0f)" % [preset, p, v.pitch])
@@ -132,7 +133,7 @@ func _test_sound(vocab: BlabberVocabulary) -> void:
 	var v := BlabberVoice.preset("woman")
 	v.pitch_variation = 0.0
 	v.intonation = 0.0
-	v.vocabulary = vocab
+	v.vocabularies = [vocab]
 	vocab.fit_to_voice = false
 	var as_recorded := _pitch(_render("Hello", v, 0))
 	check(absf(as_recorded / vocab.words[0].takes[0].pitch - 1.0) < 0.12, "not fitted: the recorded pitch (%.0f Hz)" % as_recorded)
@@ -149,14 +150,14 @@ func _test_sound(vocab: BlabberVocabulary) -> void:
 	var bank_voice := BlabberVoice.preset("man")
 	bank_voice.sample_bank = BlabberSampleBank.from_samples(_samples(Blabbermouth.bake("ba dee go mah loo shee ka", bank_voice)), 22050)
 	bank_voice.pitch = bank_voice.sample_bank.reference_pitch()
-	bank_voice.vocabulary = vocab
+	bank_voice.vocabularies = [vocab]
 	var plan := BlabberParser.build("Hello friend", bank_voice)
 	var eng := BlabberEngine.create(plan.segments, bank_voice, 22050)
 	check(eng is BlabberSampler, "sample voice uses the sampler")
 	check(_rms(eng.render_all()) > 0.02, "the sampler plays recorded words")
 	# Both engines put the take exactly where its word starts.
-	for v2 in [BlabberVoice.preset("robot"), bank_voice]:
-		v2.vocabulary = vocab
+	for v2: BlabberVoice in [BlabberVoice.preset("robot"), bank_voice]:
+		v2.vocabularies = [vocab]
 		var p2 := BlabberParser.build("Well, well. Hello there, hello!", v2)
 		var e2 := BlabberEngine.create(p2.segments, v2, 22050)
 		e2.render_all()
@@ -183,9 +184,9 @@ func _test_files(vocab: BlabberVocabulary) -> void:
 		check(a.audio.size() == b.audio.size() and absf(a.pitch - b.pitch) < 0.01 and a.pitch_track.size() == b.pitch_track.size(), "a take comes back the same")
 	# Inside a voice file.
 	var voice := BlabberVoice.preset("elder")
-	voice.vocabulary = vocab
+	voice.vocabularies = [vocab]
 	var vr := BlabberVoiceFile.from_bytes(BlabberVoiceFile.to_bytes(voice, "Hesk"))
-	check(vr.ok and vr.voice.vocabulary != null and vr.voice.vocabulary.words.size() == 2, "a voice file keeps its vocabulary")
+	check(vr.ok and vr.voice.vocabularies.size() == 1 and vr.voice.vocabularies[0].words.size() == 2, "a voice file keeps its vocabulary")
 	check(not BlabberVoiceFile.from_bytes(vocab.to_bytes()).ok, "a vocabulary isn't a voice")
 	check(not BlabberLineFile.from_bytes(vocab.to_bytes()).ok, "a vocabulary isn't a line")
 	check(BlabberVocabulary.is_vocabulary(vocab.to_bytes()) and not BlabberVocabulary.is_vocabulary(BlabberVoiceFile.to_bytes(voice)), "is_vocabulary")
@@ -194,12 +195,12 @@ func _test_files(vocab: BlabberVocabulary) -> void:
 	var lr := BlabberLineFile.from_bytes(BlabberLineFile.to_bytes(line))
 	check(lr.ok, "line with recorded words reads back")
 	if lr.ok:
-		var lv: BlabberVocabulary = lr.line.voice.vocabulary
-		check(lv != null and lv.words.size() == 1 and lv.find("hello") != null, "the line file has just the words it uses")
+		var lvs: Array = lr.line.voice.vocabularies
+		check(lvs.size() == 1 and lvs[0].words.size() == 1 and lvs[0].find("hello") != null, "the line file has just the words it uses")
 	line.text = "Nothing recorded here."
 	var plain := BlabberLineFile.from_bytes(BlabberLineFile.to_bytes(line))
-	check(plain.ok and plain.line.voice.vocabulary == null, "no recorded words, no vocabulary in the file")
-	check(line.speaker.voice.vocabulary == vocab, "a line's speaker shares the vocabulary")
+	check(plain.ok and plain.line.voice.vocabularies.is_empty(), "no recorded words, no vocabulary in the file")
+	check(line.speaker.voice.vocabularies[0] == vocab, "a line's speaker shares the vocabulary")
 	# Damaged files are refused politely.
 	var bad := vocab.to_dict()
 	bad.words[0].takes[0].audio = 12
@@ -216,6 +217,90 @@ func _test_files(vocab: BlabberVocabulary) -> void:
 	DirAccess.remove_absolute(path)
 
 
+## Several sets on one voice: the first that has a word wins, each keeps its
+## own fit setting, and voice files can link to set files.
+func _test_sets(shared: BlabberVocabulary) -> void:
+	var own := BlabberVocabulary.new()
+	own.resource_name = "Grunk's words"
+	var speaker := BlabberVoice.preset("goblin")
+	speaker.pitch_variation = 0.0
+	own.add_take("hello", _samples(Blabbermouth.bake("Hello", speaker)), 22050)
+	own.add_word("goodbye") # No takes yet: doesn't hide anything.
+	shared.resource_name = "Common words"
+	var voice := BlabberVoice.preset("goblin")
+	voice.vocabularies = [own, shared]
+	var found := BlabberParser.recorded_words("Hello, thank you.", voice)
+	check(found.size() == 2 and found[0].vocabulary == own and found[0].word == own.find("hello"), "the first set with a word wins")
+	check(found.size() == 2 and found[1].vocabulary == shared, "other words come from the next set")
+	voice.vocabularies = [shared, own]
+	check(BlabberParser.recorded_words("Hello", voice)[0].vocabulary == shared, "order decides")
+	# Each set keeps its own fit setting.
+	own.fit_to_voice = false
+	voice.vocabularies = [own, shared]
+	var plan := BlabberParser.build("Hello, thank you.", voice)
+	var fits: Array = []
+	for sg in plan.segments:
+		if sg.has("clip"):
+			fits.append(sg.fit)
+	check(fits == [false, true], "fit comes from each word's own set: %s" % [fits])
+	own.fit_to_voice = true
+	# A line file keeps each set it uses, with just those words.
+	var line := BlabberLine.create("Hello, thank you.", BlabberSpeaker.create("Grunk", voice))
+	var lr := BlabberLineFile.from_bytes(BlabberLineFile.to_bytes(line))
+	if check_ok(lr, "a line with two sets reads back"):
+		var sets: Array = lr.line.voice.vocabularies
+		check(sets.size() == 2 and sets[0].resource_name == "Grunk's words" and sets[0].words.size() == 1
+			and sets[1].resource_name == "Common words" and sets[1].words.size() == 1 and sets[1].find("thank you") != null,
+			"the line file keeps both sets, trimmed")
+	# Copies: the voice file carries both sets.
+	var copied := BlabberVoiceFile.from_bytes(BlabberVoiceFile.to_bytes(voice, "Grunk"))
+	if check_ok(copied, "a voice with two sets reads back"):
+		var sets: Array = copied.voice.vocabularies
+		check(sets.size() == 2 and sets[0].resource_name == "Grunk's words" and sets[1].find("hello").takes.size() == 2, "both sets are copied, in order")
+	# Links: the voice file names the set files, which are loaded from its folder.
+	var dir := "user://test_sets"
+	DirAccess.make_dir_recursive_absolute(dir)
+	check(shared.file_name() == "Common words.blab", "a set's file name: " + shared.file_name())
+	check(own.write(dir.path_join(own.file_name())) == OK and shared.write(dir.path_join(shared.file_name())) == OK, "set files are written")
+	var bytes := BlabberVoiceFile.to_bytes(voice, "Grunk", true)
+	check(bytes.size() < 4096, "a voice that links to its sets is small (%d bytes)" % bytes.size())
+	check(BlabberVoiceFile.write(voice, dir.path_join("Grunk.blab"), "Grunk", true) == OK, "a linked voice file is written")
+	var linked := BlabberVoiceFile.read(dir.path_join("Grunk.blab"))
+	if check_ok(linked, "a linked voice reads back"):
+		var sets: Array = linked.voice.vocabularies
+		check(sets.size() == 2 and BlabberVoiceFile.missing_sets(linked.voice).is_empty(), "linked sets are found next to the voice")
+		check(sets.size() == 2 and sets[0].find("hello").takes.size() == 1 and sets[1].find("thank you") != null, "linked sets have their words")
+		check(BlabberParser.recorded_words("Hello", linked.voice).size() == 1, "a linked voice says its words")
+	# Without its folder (or with a set missing), a link is kept as a stand-in.
+	var loose := BlabberVoiceFile.from_bytes(bytes)
+	if check_ok(loose, "a linked voice reads without its folder"):
+		check(BlabberVoiceFile.missing_sets(loose.voice) == PackedStringArray(["Grunk's words", "Common words"]), "missing sets are named: %s" % [BlabberVoiceFile.missing_sets(loose.voice)])
+		check(BlabberParser.recorded_words("Hello", loose.voice).is_empty(), "a missing set says nothing recorded")
+		var again := BlabberVoiceFile.from_bytes(BlabberVoiceFile.to_bytes(loose.voice))
+		check(again.ok and BlabberVoiceFile.missing_sets(again.voice).size() == 2, "a stand-in is saved as a link again")
+	# Links can't reach outside the folder.
+	var sneaky := {"blabbermouth_voice": 1, "voice": {}, "vocabularies": [{"name": "x", "link": "../secret.blab"}]}
+	check(not BlabberVoiceFile.from_bytes(JSON.stringify(sneaky).to_utf8_buffer(), "", dir).ok, "a link with a folder in it is refused")
+	# Voice files from before sets keep their one vocabulary.
+	var old := {"blabbermouth_voice": 1, "voice": {}, "vocabulary": shared.to_dict()}
+	var oldr := BlabberVoiceFile.from_bytes(JSON.stringify(old).to_utf8_buffer())
+	check(oldr.ok and oldr.voice.vocabularies.size() == 1 and oldr.voice.vocabularies[0].words.size() == 2, "an older voice file still opens")
+	for f in DirAccess.get_files_at(dir):
+		DirAccess.remove_absolute(dir.path_join(f))
+	DirAccess.remove_absolute(dir)
+	# Copies of a voice share its sets.
+	var c := BlabberVoiceFile.copy_voice(voice)
+	check(c.vocabularies.size() == 2 and c.vocabularies[0] == own and c.vocabularies != null, "a copied voice shares its sets")
+	c.vocabularies.erase(own)
+	check(voice.vocabularies.size() == 2, "but has its own list")
+	shared.resource_name = ""
+
+
+func check_ok(r: Dictionary, what: String) -> bool:
+	check(r.ok, what + (": " + str(r.error) if not r.ok else ""))
+	return r.ok
+
+
 func _test_node(vocab: BlabberVocabulary) -> void:
 	var node := Blabbermouth.new()
 	root.add_child(node)
@@ -230,7 +315,7 @@ func _test_node(vocab: BlabberVocabulary) -> void:
 	node.syllable_spoken.connect(func(_i: int) -> void: syls[0] += 1)
 	node.mouth_moved.connect(func(m: float) -> void: mouth[0] = maxf(mouth[0], m))
 	var voice := BlabberVoice.preset("child")
-	voice.vocabulary = vocab
+	voice.vocabularies = [vocab]
 	node.speak("Hello! Thank you.", voice)
 	var t0 := Time.get_ticks_msec()
 	while node.is_speaking() and Time.get_ticks_msec() - t0 < 8000:

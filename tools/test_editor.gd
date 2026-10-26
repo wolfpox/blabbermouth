@@ -221,27 +221,41 @@ func _baked(text: String, preset: String) -> PackedFloat32Array:
 
 func _test_vocabulary_screen() -> void:
 	var save := "user://editor_test_vocab.json"
-	DirAccess.remove_absolute(save)
-	DirAccess.remove_absolute(Cast.vocabulary_path(save))
+	_clear_editor_files(save)
 	var scene: Control = (load("res://demo/demo.tscn") as PackedScene).instantiate()
 	scene.save_path = save
 	scene.test_size = Vector2i(1280, 900)
 	root.add_child(scene)
 	for i in 4:
 		await process_frame
-	check(scene.members.all(func(m): return m.speaker.voice.vocabulary == scene.vocabulary), "every character shares the vocabulary")
+	check(scene.sets.is_empty() and scene.members.all(func(m): return m.speaker.voice.vocabularies.is_empty()), "no sets to start with")
 	scene.show_page("vocabulary")
 	var vp = scene.vocabulary_page
-	check(vp.visible and vp.empty_label.visible, "vocabulary page starts empty")
+	check(vp.visible and vp.no_sets.visible and not vp.set_panel.visible, "the page offers to make a set")
+	# A set every character shares.
+	vp._new_set()
+	var common: BlabberVocabulary = vp.vocab
+	check(scene.sets.size() == 1 and common != null and vp.set_panel.visible, "New set makes and shows a set")
+	check(Cast.users_of(common, scene.members) == [scene.member()], "a new set is used by the current character")
+	vp.name_edit.text = "Common words"
+	vp._rename()
+	check(common.resource_name == "Common words", "a set can be renamed")
+	vp.everyone_button.pressed.emit()
+	check(scene.members.all(func(m): return m.uses(common) and m.speaker.voice.vocabularies.has(common)), "Everyone gives it to every character")
+	check(vp.empty_label.visible, "an empty set says so")
 	vp.add_edit.text = "Hello!"
 	vp._add()
-	check(scene.vocabulary.find("hello") != null and vp.open_key == "hello", "Add word adds and opens it")
+	check(common.find("hello") != null and vp.open_key == "hello", "Add word adds and opens it")
 	check(vp._record_button != null and vp._load_button != null, "the open word can be recorded or loaded")
-	vp._add_audio("hello", _baked("Hello", "woman"), 22050, "")
-	check(scene.vocabulary.find("hello").takes.size() == 1, "a take is added")
+	vp._add_audio(common, "hello", _baked("Hello", "woman"), 22050, "")
+	check(common.find("hello").takes.size() == 1, "a take is added")
 	check(vp.player.playing, "the new take is played in the character's voice")
-	vp._add_audio("hello", PackedFloat32Array([0.0, 0.0]), 22050, "")
-	check(scene.vocabulary.find("hello").takes.size() == 1 and vp.status.text.begins_with("Couldn't hear"), "silence is refused")
+	vp._add_audio(common, "hello", PackedFloat32Array([0.0, 0.0]), 22050, "")
+	check(common.find("hello").takes.size() == 1 and vp.status.text.begins_with("Couldn't hear"), "silence is refused")
+	scene._add_member()
+	check(scene.member().sets == [common], "a new character gets the sets everyone uses")
+	scene.members.remove_at(scene.current)
+	scene.set_current(0)
 	# The line page shows and plays it.
 	scene.show_page("line")
 	var page = scene.line_page
@@ -254,33 +268,90 @@ func _test_vocabulary_screen() -> void:
 	check(rows == 3, "the reads card lists the shout and two recorded words (%d)" % rows)
 	check(page.source_detail.text.contains("2 recorded words"), "voice source mentions them: " + page.source_detail.text)
 	page._update_bars()
-	var bytes: PackedByteArray = scene.line_file_bytes(false)
-	var lr := BlabberLineFile.from_bytes(bytes)
-	check(lr.ok and lr.line.voice.vocabulary != null and lr.line.voice.vocabulary.find("hello") != null, "the exported line carries its recorded word")
+	var lr := BlabberLineFile.from_bytes(scene.line_file_bytes(false))
+	check(lr.ok and lr.line.voice.vocabularies.size() == 1 and lr.line.voice.vocabularies[0].find("hello") != null, "the exported line carries its recorded word")
 	page.play_button.pressed.emit()
 	check(page.dialogue.is_speaking(), "plays a line with a recorded word")
 	for i in 3:
 		await process_frame
 	page.play_button.pressed.emit()
-	# One character switched off.
-	scene.set_current(2)
-	scene.member().set_use_vocabulary(false)
-	check(BlabberParser.recorded_words("Hello", scene.member().speaker.voice).is_empty(), "switched off, the voice says it itself")
+	# Grub gets a set of his own, which goes in front of the shared one.
+	var grub_i: int = scene.members.find(scene.members.filter(func(m): return m.speaker.display_name == "Grub")[0])
+	scene.set_current(grub_i)
+	var grub = scene.member()
+	scene.show_page("vocabulary")
+	vp._new_set()
+	var own: BlabberVocabulary = vp.vocab
+	vp.name_edit.text = "Common words"
+	vp._rename()
+	check(own.resource_name == "Common words 2", "set names stay different: " + own.resource_name)
+	vp.name_edit.text = "Grub's words"
+	vp._rename()
+	vp.add_edit.text = "hello"
+	vp._add()
+	vp._add_audio(own, "hello", _baked("Hello", "goblin"), 22050, "")
+	check(Cast.users_of(own, scene.members) == [grub] and grub.sets == [common, own], "Grub uses both sets, the new one last")
+	check(BlabberParser.recorded_words("Hello", grub.speaker.voice)[0].vocabulary == common, "the first set wins")
+	var ed = scene.cast_page.editor
+	scene.show_page("cast")
+	ed.refresh()
+	var boxes: Array = []
+	for row in ed.sets_box.get_children():
+		if row is HBoxContainer:
+			boxes.append(row)
+	check(boxes.size() == 2 and boxes[0].get_child_count() == 3, "the character lists both sets, with up and down buttons")
+	(boxes[1].get_child(1) as Button).pressed.emit()
+	check(grub.sets == [own, common] and grub.speaker.voice.vocabularies[0] == own, "Up moves a set in front")
+	check(BlabberParser.recorded_words("Hello", grub.speaker.voice)[0].vocabulary == own, "and now it wins")
+	page.load_source("Hello there")
+	scene.show_page("line")
+	await process_frame
+	var said_from := ""
+	for c in page.marks_box.get_children():
+		if not c.is_queued_for_deletion():
+			for l in c.find_children("*", "Label", true, false):
+				said_from += l.text + " "
+	check(said_from.contains("from Grub's words"), "the line page says which set a word comes from: " + said_from)
+	# Someone stops using the shared set.
+	var mira = scene.members[1]
+	mira.set_uses(common, false)
+	check(BlabberParser.recorded_words("Hello", mira.speaker.voice).is_empty(), "without the set, the voice says it itself")
+	scene.set_current(1)
 	scene._duplicate_member()
-	check(not scene.member().use_vocabulary and scene.member().vocabulary == scene.vocabulary, "a copy keeps the switch")
-	scene._add_member()
-	check(scene.member().speaker.voice.vocabulary == scene.vocabulary, "a new character gets the vocabulary")
-	# A vocabulary file adds its words.
-	var other := BlabberVocabulary.new()
-	other.add_take("goodbye", _baked("Goodbye", "man"), 22050)
-	other.add_clip("hello", scene.vocabulary.find("hello").takes[0])
-	scene.open_line_bytes(other.to_bytes(), "more.blab")
-	check(scene.vocabulary.find("goodbye") != null and scene.vocabulary.find("hello").takes.size() == 1, "opening a vocabulary adds new words, not repeats (%s, %d takes)" % [scene.vocabulary.find("goodbye"), scene.vocabulary.find("hello").takes.size()])
-	check(vp.visible, "and shows the vocabulary page")
+	check(scene.member().sets.is_empty(), "a copy uses the same sets")
+	scene.members.remove_at(scene.current)
+	scene.set_current(grub_i)
+	# Opening set files: the same name adds to it, a new name makes a new set.
+	var more := BlabberVocabulary.new()
+	more.resource_name = "Common words"
+	more.add_take("goodbye", _baked("Goodbye", "man"), 22050)
+	more.add_clip("hello", common.find("hello").takes[0])
+	scene.open_line_bytes(more.to_bytes(), "more.blab")
+	check(scene.sets.size() == 2 and common.find("goodbye") != null and common.find("hello").takes.size() == 1, "opening a set with the same name adds new words, not repeats")
+	check(vp.visible and vp.vocab == common, "and shows that set")
+	var grunts := BlabberVocabulary.new()
+	grunts.add_take("hmph", _baked("Hmph", "monster"), 22050)
+	scene.open_line_bytes(grunts.to_bytes(), "Monster grunts.blab")
+	var g: BlabberVocabulary = Cast.set_named(scene.sets, "Monster grunts")
+	check(scene.sets.size() == 3 and g != null and vp.vocab == g and grub.uses(g), "a new set file becomes a new set, named after the file")
+	# A voice file that links to sets by name gets the editor's sets.
+	var linked := BlabberVoice.preset("goblin")
+	linked.vocabularies.assign([own, g])
+	var vr := BlabberVoiceFile.from_bytes(BlabberVoiceFile.to_bytes(linked, "Linked", true))
+	check(vr.ok and BlabberVoiceFile.missing_sets(vr.voice).size() == 2, "a linked voice file has stand-ins")
+	scene.set_current(0)
+	scene._open_voice(vr.voice, "Linked")
+	check(scene.member().sets == [own, g], "opening it matches its links to the sets by name")
+	# Library: saved voices link to the sets; exports copy them by default.
+	var resolved: BlabberVoice = scene._resolve_links(vr.voice)
+	check(resolved.vocabularies.size() == 2 and not BlabberVoiceFile.is_link(resolved.vocabularies[0]), "the Voices page can swap links for the sets")
+	scene.member().sets = [common]
+	scene.member().apply_sets()
 	# Saved and loaded again.
 	scene.save_now()
-	check(FileAccess.file_exists(Cast.vocabulary_path(save)), "the vocabulary is saved in its own file")
+	check(DirAccess.get_files_at(Cast.sets_dir(save)).size() == 3, "each set is saved in its own file")
 	var n_members: int = scene.members.size()
+	var names: Array = scene.sets.map(func(vs): return vs.resource_name)
 	scene.queue_free()
 	await process_frame
 	var again: Control = (load("res://demo/demo.tscn") as PackedScene).instantiate()
@@ -289,13 +360,66 @@ func _test_vocabulary_screen() -> void:
 	root.add_child(again)
 	for i in 3:
 		await process_frame
-	check(again.vocabulary.find("hello") != null and again.vocabulary.find("goodbye") != null, "the vocabulary comes back")
-	check(again.members.size() == n_members and not again.members[2].use_vocabulary and again.members[2].speaker.voice.vocabulary == null, "the switch comes back")
-	check(again.members[0].speaker.voice.vocabulary == again.vocabulary, "the others use it again")
+	check(again.sets.map(func(vs): return vs.resource_name) == names, "the sets come back in order: %s" % [again.sets.map(func(vs): return vs.resource_name)])
+	var c2: BlabberVocabulary = again.sets[0]
+	var own2: BlabberVocabulary = Cast.set_named(again.sets, "Grub's words")
+	check(c2.find("hello") != null and c2.find("goodbye") != null and own2.find("hello").takes.size() == 1, "their words come back")
+	check(again.members.size() == n_members and again.members[grub_i].sets.size() == 3 and again.members[grub_i].sets[0] == own2, "who uses which set, in order, comes back")
+	check(not again.members[1].uses(c2) and again.members[2].uses(c2), "and who doesn't")
+	check(again.members[grub_i].speaker.voice.vocabularies[0] == own2, "voices get their sets again")
 	again.show_page("vocabulary")
-	again.vocabulary_page._remove(again.vocabulary.find("goodbye"))
-	check(again.vocabulary.find("goodbye") == null, "a word can be removed")
+	var vp2 = again.vocabulary_page
+	vp2.show_sets(again.sets, c2)
+	vp2._remove(c2.find("goodbye"))
+	check(c2.find("goodbye") == null, "a word can be removed")
+	# Deleting a set.
+	vp2.show_sets(again.sets, own2)
+	vp2._delete_set()
+	vp2.confirm.confirmed.emit()
+	check(not again.sets.has(own2) and again.members.all(func(m): return not m.uses(own2)), "a deleted set is gone from every character")
+	check(DirAccess.get_files_at(Cast.sets_dir(save)).size() == 2, "and its file is removed")
+	again.save_now()
 	again.queue_free()
 	await process_frame
+	_clear_editor_files(save)
+	await _test_old_vocabulary(save)
+	_clear_editor_files(save)
+
+
+## The one shared vocabulary of the previous version becomes a set.
+func _test_old_vocabulary(save: String) -> void:
+	var old := BlabberVocabulary.new()
+	old.add_take("hello", _baked("Hello", "woman"), 22050)
+	old.write(Cast.old_vocabulary_path(save), "Vocabulary")
+	var members := Cast.defaults()
+	Cast.save_state(members, 0, "Hello", save)
+	var f := FileAccess.open(save, FileAccess.READ)
+	var data: Dictionary = JSON.parse_string(f.get_as_text())
+	f.close()
+	for e in data.members:
+		e.erase("sets")
+	data.members[1]["use_vocabulary"] = false
+	f = FileAccess.open(save, FileAccess.WRITE)
+	f.store_string(JSON.stringify(data))
+	f.close()
+	var scene: Control = (load("res://demo/demo.tscn") as PackedScene).instantiate()
+	scene.save_path = save
+	scene.test_size = Vector2i(1280, 900)
+	root.add_child(scene)
+	for i in 3:
+		await process_frame
+	check(scene.sets.size() == 1 and scene.sets[0].resource_name == "Shared words" and scene.sets[0].find("hello") != null, "the old vocabulary becomes a set")
+	check(scene.members[0].uses(scene.sets[0]) and not scene.members[1].uses(scene.sets[0]), "used by the characters that had it on")
+	scene.save_now()
+	check(not FileAccess.file_exists(Cast.old_vocabulary_path(save)) and DirAccess.get_files_at(Cast.sets_dir(save)).size() == 1, "and is saved as a set file")
+	scene.queue_free()
+	await process_frame
+
+
+func _clear_editor_files(save: String) -> void:
 	DirAccess.remove_absolute(save)
-	DirAccess.remove_absolute(Cast.vocabulary_path(save))
+	DirAccess.remove_absolute(Cast.old_vocabulary_path(save))
+	if DirAccess.dir_exists_absolute(Cast.sets_dir(save)):
+		for f in DirAccess.get_files_at(Cast.sets_dir(save)):
+			DirAccess.remove_absolute(Cast.sets_dir(save).path_join(f))
+		DirAccess.remove_absolute(Cast.sets_dir(save))

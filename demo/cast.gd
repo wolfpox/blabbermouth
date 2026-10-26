@@ -1,11 +1,12 @@
 extends RefCounted
 ## The demo's characters. Each is a BlabberSpeaker (name, voice, bubble) plus
 ## what the editor needs around it: the voice preset it started from, a
-## recording that's kept even while the synth voice is in use, and whether
-## it uses the shared vocabulary (recorded words).
+## recording that's kept even while the synth voice is in use, and which
+## sets of recorded words (vocabularies) it uses.
 
 const SAVE_PATH := "user://editor.json"
 const FORMAT := 1
+const DEFAULT_SET_NAME := "Recorded words"
 
 ## Fonts that ship with the demo. "size" suits each one's look.
 const FONTS := {
@@ -61,20 +62,40 @@ class Member extends RefCounted:
 	## The user's recording for this character, kept while the synth voice is used.
 	var recording: BlabberSampleBank
 	var use_recording := false
-	## The cast's shared vocabulary.
-	var vocabulary: BlabberVocabulary
-	## Say vocabulary words with their recordings.
-	var use_vocabulary := true
+	## The sets of recorded words this character uses. When two have the
+	## same word, the first one wins.
+	var sets: Array = []
 
 	## Speak with the recording (if there is one) or the synth voice.
 	func set_use_recording(on: bool) -> void:
 		use_recording = on and recording != null
 		speaker.voice.sample_bank = recording if use_recording else null
-		speaker.voice.vocabulary = vocabulary if use_vocabulary else null
+		apply_sets()
 
-	func set_use_vocabulary(on: bool) -> void:
-		use_vocabulary = on
-		speaker.voice.vocabulary = vocabulary if use_vocabulary else null
+	## Gives the voice this character's sets (after they or the voice change).
+	func apply_sets() -> void:
+		speaker.voice.vocabularies.assign(sets)
+
+	func uses(vs: BlabberVocabulary) -> bool:
+		return sets.has(vs)
+
+	## Starts or stops using a set. A new one goes last.
+	func set_uses(vs: BlabberVocabulary, on: bool) -> void:
+		if on and not sets.has(vs):
+			sets.append(vs)
+		elif not on:
+			sets.erase(vs)
+		apply_sets()
+
+	## Moves a set earlier (-1) or later (+1) in the list.
+	func move_set(vs: BlabberVocabulary, by: int) -> void:
+		var i := sets.find(vs)
+		var j := i + by
+		if i < 0 or j < 0 or j >= sets.size():
+			return
+		sets[i] = sets[j]
+		sets[j] = vs
+		apply_sets()
 
 	## Which of the demo's fonts the bubble uses, or "" for another font.
 	func font_key() -> String:
@@ -136,31 +157,131 @@ static func copy_member(m: Member, new_name: String) -> Member:
 	c.speaker = m.speaker.copy()
 	c.speaker.display_name = new_name
 	c.recording = m.recording
-	c.vocabulary = m.vocabulary
-	c.use_vocabulary = m.use_vocabulary
+	c.sets = m.sets.duplicate()
 	c.set_use_recording(m.use_recording)
 	return c
 
 
-## Gives every character the shared vocabulary (each keeps its own on/off).
-static func attach_vocabulary(members: Array, vocab: BlabberVocabulary) -> void:
-	for m in members:
-		m.vocabulary = vocab
-		m.set_use_vocabulary(m.use_vocabulary)
+# --- Sets of recorded words ------------------------------------------------------
+
+## The sets every character uses (a new character starts with these).
+static func shared_sets(members: Array, sets: Array) -> Array:
+	var out: Array = []
+	for vs in sets:
+		var all := not members.is_empty()
+		for m in members:
+			all = all and m.uses(vs)
+		if all:
+			out.append(vs)
+	return out
 
 
-## Where the vocabulary is kept, next to the editor's save file.
-static func vocabulary_path(save_path := SAVE_PATH) -> String:
+## The characters that use a set.
+static func users_of(vs: BlabberVocabulary, members: Array) -> Array:
+	return members.filter(func(m) -> bool: return m.uses(vs))
+
+
+## A set name no other set has: "Goblin words", then "Goblin words 2", ...
+static func unique_set_name(sets: Array, wanted: String, except: BlabberVocabulary = null) -> String:
+	wanted = BlabberVoiceFile.clean_name(wanted)
+	if wanted == "":
+		wanted = DEFAULT_SET_NAME
+	var taken := {}
+	for vs in sets:
+		if vs != except:
+			taken[vs.resource_name.to_lower()] = true
+	if not taken.has(wanted.to_lower()):
+		return wanted
+	var n := 2
+	while taken.has(("%s %d" % [wanted, n]).to_lower()):
+		n += 1
+	return "%s %d" % [wanted, n]
+
+
+## The set with this name (any case), or null.
+static func set_named(sets: Array, set_name: String) -> BlabberVocabulary:
+	for vs in sets:
+		if vs.resource_name.to_lower() == set_name.to_lower():
+			return vs
+	return null
+
+
+## Each set's id: its file name in the sets folder. Kept here rather than on
+## the set, so sets saved for games don't carry it.
+static var _set_ids := {}
+
+
+static func set_id(vs: BlabberVocabulary) -> String:
+	return _set_ids.get(vs, "")
+
+
+## Forgets a set's id (for a set that's deleted, or that came from a file).
+static func forget_id(vs: BlabberVocabulary) -> void:
+	_set_ids.erase(vs)
+
+
+## Gives a set an id (its file name in the sets folder) if it has none.
+static func give_id(vs: BlabberVocabulary, sets: Array) -> void:
+	if set_id(vs) != "":
+		return
+	var taken := {}
+	for other in sets:
+		taken[set_id(other)] = true
+	var n := 1
+	while taken.has("set%d" % n):
+		n += 1
+	_set_ids[vs] = "set%d" % n
+
+
+## Where the sets are kept, one file each, next to the editor's save file.
+static func sets_dir(save_path := SAVE_PATH) -> String:
+	return save_path.get_basename() + "_sets"
+
+
+## Where older versions kept their one shared vocabulary.
+static func old_vocabulary_path(save_path := SAVE_PATH) -> String:
 	return save_path.get_basename() + "_vocabulary.blab"
 
 
-## The saved vocabulary, or a new empty one.
-static func load_vocabulary(path: String) -> BlabberVocabulary:
-	if FileAccess.file_exists(path):
-		var r := BlabberVocabulary.read(path)
-		if r.ok:
-			return r.vocabulary
-	return BlabberVocabulary.new()
+static func save_set(vs: BlabberVocabulary, save_path := SAVE_PATH) -> Error:
+	var err := DirAccess.make_dir_recursive_absolute(sets_dir(save_path))
+	if err != OK:
+		return err
+	return vs.write(sets_dir(save_path).path_join(set_id(vs) + ".blab"))
+
+
+static func delete_set_file(vs: BlabberVocabulary, save_path := SAVE_PATH) -> void:
+	var path := sets_dir(save_path).path_join(set_id(vs) + ".blab")
+	if set_id(vs) != "" and FileAccess.file_exists(path):
+		DirAccess.remove_absolute(path)
+
+
+## The saved sets: those listed in order first, then any others.
+static func load_sets(save_path := SAVE_PATH, order: Array = []) -> Array:
+	var dir := sets_dir(save_path)
+	var by_id := {}
+	if DirAccess.dir_exists_absolute(dir):
+		for f in DirAccess.get_files_at(dir):
+			if f.get_extension().to_lower() != BlabberVoiceFile.EXTENSION:
+				continue
+			var r := BlabberVocabulary.read(dir.path_join(f))
+			if not r.ok:
+				continue
+			var vs: BlabberVocabulary = r.vocabulary
+			if vs.resource_name == "":
+				vs.resource_name = DEFAULT_SET_NAME
+			_set_ids[vs] = f.get_basename()
+			by_id[f.get_basename()] = vs
+	var out: Array = []
+	for id in order:
+		if by_id.has(str(id)):
+			out.append(by_id[str(id)])
+			by_id.erase(str(id))
+	var rest := by_id.keys()
+	rest.sort()
+	for id in rest:
+		out.append(by_id[id])
+	return out
 
 
 ## Adds the words of another vocabulary (from a file) that aren't there yet,
@@ -226,24 +347,24 @@ static func unique_name(members: Array, wanted: String) -> String:
 	return "%s %d" % [wanted, n]
 
 
-## Saves the characters, who's speaking and the line being edited.
-static func save_state(members: Array, current: int, line_source: String, path := SAVE_PATH) -> Error:
+## Saves the characters, who's speaking and the line being edited. The sets
+## are saved on their own (save_set()); this keeps their order and who uses them.
+static func save_state(members: Array, current: int, line_source: String, path := SAVE_PATH, sets: Array = []) -> Error:
 	var list: Array = []
 	for m in members:
 		var key: String = m.font_key()
 		# Save the recording even while it isn't in use.
 		var voice: BlabberVoice = m.speaker.voice
-		# The vocabulary is shared, so it's saved once, on its own.
 		var in_use := voice.sample_bank
-		var vocab := voice.vocabulary
 		voice.sample_bank = m.recording
-		voice.vocabulary = null
+		voice.vocabularies.clear()
 		var d: Dictionary = m.speaker.to_dict(key == "")
 		voice.sample_bank = in_use
-		voice.vocabulary = vocab
+		m.apply_sets()
 		list.append({"kind": m.kind, "font": key, "use_recording": m.use_recording,
-			"use_vocabulary": m.use_vocabulary, "speaker": d})
-	var data := {"blabbermouth_editor": FORMAT, "current": current, "line": line_source, "members": list}
+			"sets": m.sets.map(func(vs) -> String: return set_id(vs)), "speaker": d})
+	var data := {"blabbermouth_editor": FORMAT, "current": current, "line": line_source, "members": list,
+		"sets": sets.map(func(vs) -> String: return set_id(vs))}
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		return FileAccess.get_open_error()
@@ -253,16 +374,32 @@ static func save_state(members: Array, current: int, line_source: String, path :
 	return err
 
 
-## Returns {members, current, line}, or {} if nothing usable is saved.
+## Returns {members, current, line, sets, migrated}, or {sets} alone if no
+## characters are saved. migrated: the sets came from an older version's one
+## vocabulary, and need saving.
 static func load_state(path := SAVE_PATH) -> Dictionary:
-	if not FileAccess.file_exists(path):
-		return {}
-	var parsed := BlabberVoiceFile.decode_json(FileAccess.get_file_as_bytes(path), "editor")
-	if not parsed.ok:
-		return {}
-	var data: Dictionary = parsed.data
-	if typeof(data.get("members")) != TYPE_ARRAY or int(data.get("blabbermouth_editor", 0)) > FORMAT:
-		return {}
+	var data := {}
+	if FileAccess.file_exists(path):
+		var parsed := BlabberVoiceFile.decode_json(FileAccess.get_file_as_bytes(path), "editor")
+		if parsed.ok and typeof(parsed.data.get("members")) == TYPE_ARRAY and int(parsed.data.get("blabbermouth_editor", 0)) <= FORMAT:
+			data = parsed.data
+	var order = data.get("sets", [])
+	var sets := load_sets(path, order if typeof(order) == TYPE_ARRAY else [])
+	var by_id := {}
+	for vs in sets:
+		by_id[set_id(vs)] = vs
+	# Older versions had one vocabulary that every character could switch on.
+	var old: BlabberVocabulary = null
+	if sets.is_empty() and FileAccess.file_exists(old_vocabulary_path(path)):
+		var r := BlabberVocabulary.read(old_vocabulary_path(path))
+		if r.ok and not r.vocabulary.words.is_empty():
+			old = r.vocabulary
+			if old.resource_name in ["", "Vocabulary"]:
+				old.resource_name = "Shared words"
+			give_id(old, sets)
+			sets.append(old)
+	if data.is_empty():
+		return {"sets": sets, "migrated": old != null}
 	var members: Array = []
 	for e in data.members:
 		if typeof(e) != TYPE_DICTIONARY or typeof(e.get("speaker")) != TYPE_DICTIONARY:
@@ -282,12 +419,18 @@ static func load_state(path := SAVE_PATH) -> Dictionary:
 		var kind := str(e.get("kind", "man"))
 		m.kind = kind if kind in BlabberVoice.PRESET_NAMES else "man"
 		m.recording = m.speaker.voice.sample_bank
-		m.use_vocabulary = e.get("use_vocabulary", true) != false
+		var ids = e.get("sets")
+		if typeof(ids) == TYPE_ARRAY:
+			for id in ids:
+				if by_id.has(str(id)) and not m.sets.has(by_id[str(id)]):
+					m.sets.append(by_id[str(id)])
+		elif old != null and e.get("use_vocabulary", true) != false:
+			m.sets = [old]
 		m.set_use_recording(e.get("use_recording") == true)
 		members.append(m)
 	if members.is_empty():
-		return {}
+		return {"sets": sets, "migrated": old != null}
 	var cur = data.get("current", 0)
 	var line = data.get("line", "")
 	return {"members": members, "current": clampi(int(cur) if typeof(cur) in [TYPE_INT, TYPE_FLOAT] else 0, 0, members.size() - 1),
-		"line": line if typeof(line) == TYPE_STRING else ""}
+		"line": line if typeof(line) == TYPE_STRING else "", "sets": sets, "migrated": old != null}

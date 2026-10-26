@@ -31,7 +31,7 @@ func copy() -> BlabberSpeaker:
 
 
 ## Plain values for a line file. With only_words_in (the line's text), the
-## voice's vocabulary keeps just the words that line uses.
+## voice's vocabularies keep just the words that line uses.
 func to_dict(embed_font := true, only_words_in = null) -> Dictionary:
 	var d := {"name": BlabberVoiceFile.clean_name(display_name)}
 	if voice:
