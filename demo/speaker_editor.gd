@@ -35,6 +35,8 @@ const SHADOWS := [["None", 0, 0, 0, 0.0], ["Drop", 1, 0, 6, 0.25], ["Offset", 1,
 
 var full := false
 var member: Cast.Member
+## Returns every set of recorded words, to choose from. Set by the demo.
+var get_sets: Callable
 
 var name_title: Label
 var kind_label: Label
@@ -47,7 +49,7 @@ var shadow_buttons: Array = []
 var sliders := {}
 var values := {}
 var words_check: CheckButton
-var vocab_check: CheckButton
+var sets_box: VBoxContainer
 var tail_check: CheckButton
 var _syncing := false
 
@@ -184,15 +186,11 @@ func _ready() -> void:
 		member.speaker.voice.mode = BlabberVoice.Mode.PHONETIC if on else BlabberVoice.Mode.GIBBERISH
 		changed.emit("voice"))
 	voice.add_child(words_check)
-	vocab_check = CheckButton.new()
-	vocab_check.text = "Says vocabulary words with their recordings"
-	vocab_check.tooltip_text = "Words on the Vocabulary page are spoken with your recordings, in this character's pitch and size."
-	vocab_check.toggled.connect(func(on: bool) -> void:
-		if _syncing:
-			return
-		member.set_use_vocabulary(on)
-		changed.emit("voice"))
-	voice.add_child(vocab_check)
+	var rec := Ui.vbox(6)
+	rec.add_child(Ui.label("Recorded words", 14, Ui.TEXT_2))
+	sets_box = Ui.vbox(2)
+	rec.add_child(sets_box)
+	voice.add_child(rec)
 	if full:
 		for spec in MORE_SLIDERS:
 			voice.add_child(_slider_row(spec[0], spec, _voice_value))
@@ -258,8 +256,53 @@ func _sync() -> void:
 		sliders[prop].set_value_no_signal(val)
 		values[prop].text = _fmt(prop, val)
 	words_check.set_pressed_no_signal(v.mode == BlabberVoice.Mode.PHONETIC)
-	vocab_check.set_pressed_no_signal(member.use_vocabulary)
+	_fill_sets()
 	_syncing = false
+
+
+## The sets this character can use: theirs first, in order, then the rest.
+func _fill_sets() -> void:
+	for c in sets_box.get_children():
+		sets_box.remove_child(c)
+		c.queue_free()
+	var all: Array = get_sets.call() if get_sets.is_valid() else []
+	if all.is_empty():
+		sets_box.add_child(Ui.label("Make sets of real recorded words on the Vocabulary page, then choose them here.", 13, Ui.FAINT))
+		return
+	var mine: Array = member.sets.filter(func(vs) -> bool: return all.has(vs))
+	var ordered: Array = mine + all.filter(func(vs) -> bool: return not member.uses(vs))
+	for vs in ordered:
+		var row := Ui.hbox(2)
+		var c := CheckBox.new()
+		c.text = vs.resource_name
+		c.button_pressed = member.uses(vs)
+		c.clip_text = true
+		c.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		c.custom_minimum_size.y = 40
+		var n: int = vs.lookup().size()
+		c.tooltip_text = "%s says the %d word%s in “%s” with their recordings" % [member.speaker.display_name, n, "" if n == 1 else "s", vs.resource_name]
+		c.toggled.connect(func(on: bool) -> void:
+			member.set_uses(vs, on)
+			changed.emit("voice")
+			_fill_sets.call_deferred())
+		row.add_child(c)
+		var i := mine.find(vs)
+		if i >= 0 and mine.size() > 1:
+			for d in [-1, 1]:
+				var b := Button.new()
+				b.icon = Ui.icon("up" if d < 0 else "down")
+				b.flat = true
+				b.custom_minimum_size = Vector2(36, 36)
+				b.tooltip_text = "Move up: wins over the sets below it" if d < 0 else "Move down"
+				b.disabled = (d < 0 and i == 0) or (d > 0 and i == mine.size() - 1)
+				b.pressed.connect(func() -> void:
+					member.move_set(vs, d)
+					changed.emit("voice")
+					_fill_sets.call_deferred())
+				row.add_child(b)
+		sets_box.add_child(row)
+	if mine.size() > 1:
+		sets_box.add_child(Ui.label("When two sets have the same word, the higher one wins.", 13, Ui.FAINT))
 
 
 static func _closest_corner(r: int) -> String:

@@ -15,7 +15,7 @@ extends Node
 ## [whisper]...[/whisper]  [shout]...[/shout]  [reset]
 ## [shiver] [wave] [swell] [bounce] [droop] [jolt] ...[/name]
 ## [/codeblock]
-## Give the voice a [member BlabberVoice.vocabulary] and its words are
+## Give the voice [member BlabberVoice.vocabularies] and their words are
 ## spoken with real recordings, fitted to the voice and the tags.
 ## Emotions: happy, excited, angry, sad, scared. Effects, an emotion and
 ## whisper or shout can all be combined. On a RichTextLabel the effects,

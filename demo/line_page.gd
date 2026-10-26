@@ -488,7 +488,7 @@ func _mark_row(m: Dictionary) -> Control:
 	return row
 
 
-## A word the vocabulary says with a recording.
+## A word said with a recording from one of the speaker's sets.
 func _recorded_row(r: Dictionary) -> Control:
 	var on: bool = sel == Vector2i(r.start, r.end)
 	var row := Clickable.new(Ui.box(Ui.CLEAR, 14, Ui.LINE_SOFT, 1, 14, 8), Ui.box(Ui.RAISED, 14, Ui.LINE, 1, 14, 8), Ui.box(Color("2c2f39"), 14, Ui.ACCENT, 1, 14, 8))
@@ -509,9 +509,12 @@ func _recorded_row(r: Dictionary) -> Control:
 	flow.add_child(chip)
 	var w: BlabberWord = r.word
 	var n := w.takes.size()
-	var fit := member.speaker.voice.vocabulary.fit_to_voice
-	var d := Ui.label("%s · %s" % ["one take" if n == 1 else "one of %d takes" % n,
-		"at %s’s pitch and size" % member.speaker.display_name if fit else "as recorded"], 14, Ui.DIM)
+	var vs: BlabberVocabulary = r.vocabulary
+	var parts := ["one take" if n == 1 else "one of %d takes" % n,
+		"at %s’s pitch and size" % member.speaker.display_name if vs.fit_to_voice else "as recorded"]
+	if member.sets.size() > 1:
+		parts.append("from %s" % vs.resource_name)
+	var d := Ui.label(" · ".join(parts), 14, Ui.DIM)
 	d.autowrap_mode = TextServer.AUTOWRAP_OFF
 	d.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	d.mouse_filter = Control.MOUSE_FILTER_IGNORE

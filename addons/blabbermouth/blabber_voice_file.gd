@@ -5,9 +5,11 @@ extends RefCounted
 ## (A .blab file can also hold a whole line of dialogue: see BlabberLineFile.)
 ##
 ## A .blab file is plain JSON text: the voice settings, plus the recording
-## (as 16-bit audio in base64) when the voice has one, and its vocabulary
-## (recorded words) when it has one. Unlike .tres and .res
-## files it can't contain code, so it is safe to open files other people made.
+## (as 16-bit audio in base64) when the voice has one, and its vocabularies
+## (sets of recorded words) when it has some. Each set is either a copy of
+## the set or a link to the set's own file (by file name, in the same
+## folder), so voices that share a set can share one file. Unlike .tres and
+## .res files it can't contain code, so it is safe to open files other people made.
 ## [codeblock]
 ## BlabberVoiceFile.write(voice, "user://goblin.blab", "Grumpy goblin")
 ## var result := BlabberVoiceFile.read("user://goblin.blab")
@@ -20,21 +22,26 @@ const FORMAT := 1 ## Bumped when the layout changes in a way old versions can't 
 const MAX_BYTES := 32 * 1024 * 1024
 const MAX_NAME := 60
 const MAX_TEXT := 400 ## Longest onsets / vowels / codas string.
-const SKIP := ["sample_bank"]
+const SKIP := ["sample_bank", "vocabularies"]
+const MAX_SETS := 32 ## Vocabularies per voice.
+const LINK_META := &"blabbermouth_link"
 
 
 ## Writes a voice to a file. Returns OK or an error code.
-static func write(voice: BlabberVoice, path: String, voice_name := "") -> Error:
+## link_sets: link to the voice's vocabularies by file name (see
+## BlabberVocabulary.file_name()) instead of copying them into the file.
+static func write(voice: BlabberVoice, path: String, voice_name := "", link_sets := false) -> Error:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		return FileAccess.get_open_error()
-	f.store_buffer(to_bytes(voice, voice_name))
+	f.store_buffer(to_bytes(voice, voice_name, link_sets))
 	var err := f.get_error()
 	f.close()
 	return err
 
 
-## Reads a voice file. Returns {ok, voice, name, error}.
+## Reads a voice file. Returns {ok, voice, name, error}. Linked
+## vocabularies are loaded from the same folder (see missing_sets()).
 static func read(path: String) -> Dictionary:
 	if not FileAccess.file_exists(path):
 		return _fail("File not found: " + path.get_file())
@@ -45,23 +52,26 @@ static func read(path: String) -> Dictionary:
 		return _fail("%s is too big to be a voice file." % path.get_file())
 	var bytes := f.get_buffer(f.get_length())
 	f.close()
-	return from_bytes(bytes, path.get_file().get_basename())
+	return from_bytes(bytes, path.get_file().get_basename(), path.get_base_dir())
 
 
 ## The file contents for a voice, e.g. to download it in a web export.
-static func to_bytes(voice: BlabberVoice, voice_name := "") -> PackedByteArray:
+## link_sets: see write().
+static func to_bytes(voice: BlabberVoice, voice_name := "", link_sets := false) -> PackedByteArray:
 	var data := {
 		"blabbermouth_voice": FORMAT,
 		"name": clean_name(voice_name if voice_name != "" else voice.resource_name),
 	}
-	data.merge(voice_to_dict(voice))
+	data.merge(voice_to_dict(voice, null, link_sets))
 	return JSON.stringify(data, "\t").to_utf8_buffer()
 
 
 ## Reads a voice from file contents. Returns {ok, voice, name, error}.
 ## fallback_name is used when the file has no name inside.
 ## A line file (see BlabberLineFile) gives its speaker's voice.
-static func from_bytes(bytes: PackedByteArray, fallback_name := "") -> Dictionary:
+## base_dir: the folder linked vocabularies are loaded from ("" to leave
+## them unloaded: see missing_sets()).
+static func from_bytes(bytes: PackedByteArray, fallback_name := "", base_dir := "") -> Dictionary:
 	var parsed := decode_json(bytes, "voice")
 	if not parsed.ok:
 		return _fail(parsed.error)
@@ -81,7 +91,7 @@ static func from_bytes(bytes: PackedByteArray, fallback_name := "") -> Dictionar
 			return _fail("This isn't a Blabbermouth voice file.")
 		if int(version) > FORMAT:
 			return _fail("This voice was made with a newer version of Blabbermouth.")
-	var r := voice_from_dict(data)
+	var r := voice_from_dict(data, base_dir)
 	if not r.ok:
 		return r
 	var voice: BlabberVoice = r.voice
@@ -93,24 +103,34 @@ static func from_bytes(bytes: PackedByteArray, fallback_name := "") -> Dictionar
 
 
 ## A voice as plain values: {"voice": settings, "samples": recording,
-## "vocabulary": recorded words}. "samples" and "vocabulary" are left out
-## when the voice has none. With only_words_in (a line's text), the
-## vocabulary keeps just the words that line uses.
-static func voice_to_dict(voice: BlabberVoice, only_words_in = null) -> Dictionary:
+## "vocabularies": [set, ...]}. "samples" and "vocabularies" are left out
+## when the voice has none. With only_words_in (a line's text), the sets are
+## copies with just the words that line uses. link_sets: see write().
+static func voice_to_dict(voice: BlabberVoice, only_words_in = null, link_sets := false) -> Dictionary:
 	var d := {"voice": settings_of(voice)}
 	var bank := voice.sample_bank
 	if bank != null and bank.slice_count() > 0:
 		d["samples"] = _bank_to_dict(bank)
-	var vocab := voice.vocabulary
-	if vocab != null and only_words_in is String:
-		vocab = vocab.only_used_in(only_words_in)
-	if vocab != null and not vocab.lookup().is_empty():
-		d["vocabulary"] = vocab.to_dict()
+	var sets: Array = []
+	if only_words_in is String:
+		for vs in BlabberVocabulary.used_in(voice.vocabularies, only_words_in):
+			sets.append(vs.to_dict())
+	else:
+		for vs in voice.vocabularies:
+			if vs == null:
+				continue
+			if link_sets or is_link(vs):
+				sets.append({"name": clean_name(vs.resource_name), "link": link_of(vs)})
+			elif not vs.lookup().is_empty():
+				sets.append(vs.to_dict())
+	if not sets.is_empty():
+		d["vocabularies"] = sets
 	return d
 
 
 ## Rebuilds a voice from voice_to_dict() values. Returns {ok, voice, error}.
-static func voice_from_dict(d: Dictionary) -> Dictionary:
+## base_dir: see from_bytes().
+static func voice_from_dict(d: Dictionary, base_dir := "") -> Dictionary:
 	var voice := BlabberVoice.new()
 	var settings = d.get("voice", {})
 	if typeof(settings) == TYPE_DICTIONARY:
@@ -120,22 +140,56 @@ static func voice_from_dict(d: Dictionary) -> Dictionary:
 		if bank == null:
 			return _fail("The recording in this file is damaged.")
 		voice.sample_bank = bank
+	var sets = d.get("vocabularies", [])
 	if d.has("vocabulary"):
-		var r := BlabberVocabulary.from_dict(d.vocabulary)
+		sets = [d.vocabulary] # Files from before a voice could have several sets.
+	if typeof(sets) != TYPE_ARRAY or sets.size() > MAX_SETS:
+		return _fail("The recorded words in this file are damaged.")
+	for e in sets:
+		if typeof(e) == TYPE_DICTIONARY and e.has("link"):
+			var vs := _linked_set(e, base_dir)
+			if vs == null:
+				return _fail("A link to recorded words in this file is damaged.")
+			voice.vocabularies.append(vs)
+			continue
+		var r := BlabberVocabulary.from_dict(e)
 		if not r.ok:
 			return _fail(r.error)
-		voice.vocabulary = r.vocabulary
+		voice.vocabularies.append(r.vocabulary)
 	return {"ok": true, "voice": voice, "name": "", "error": ""}
 
 
-## A separate copy of a voice, recording included. The vocabulary is
-## shared, since several voices often use the same one.
+## True if this vocabulary is a link to a set file that hasn't been loaded
+## (from a voice file read without its folder, or whose set file is missing).
+## It has no words; put the set itself in its place with the same name.
+static func is_link(vocab: BlabberVocabulary) -> bool:
+	return vocab != null and vocab.has_meta(LINK_META)
+
+
+## The file name a voice file links to this set by.
+static func link_of(vocab: BlabberVocabulary) -> String:
+	if is_link(vocab):
+		return str(vocab.get_meta(LINK_META))
+	return vocab.file_name()
+
+
+## The names of the linked sets this voice is missing, for warnings.
+static func missing_sets(voice: BlabberVoice) -> PackedStringArray:
+	var out: PackedStringArray = []
+	for vs in voice.vocabularies:
+		if is_link(vs):
+			out.append(vs.resource_name if vs.resource_name != "" else link_of(vs))
+	return out
+
+
+## A separate copy of a voice, recording included. The vocabularies are
+## shared, since several voices often use the same ones.
 static func copy_voice(voice: BlabberVoice) -> BlabberVoice:
 	var v := BlabberVoice.new()
 	apply_settings(v, settings_of(voice))
 	if voice.sample_bank:
 		v.sample_bank = voice.sample_bank.duplicate()
-	v.vocabulary = voice.vocabulary
+	v.vocabularies = voice.vocabularies.duplicate()
 	v.resource_name = voice.resource_name
 	return v
 
@@ -200,6 +254,36 @@ static func clean_name(text: String) -> String:
 
 
 # --- Internals ------------------------------------------------------------------
+
+## A linked set: loaded from base_dir if it's there, otherwise a stand-in
+## with no words (see is_link()). Null if the link isn't a plain file name.
+static func _linked_set(e: Dictionary, base_dir: String) -> BlabberVocabulary:
+	var file = e.get("link")
+	if typeof(file) != TYPE_STRING:
+		return null
+	if file != file.get_file() or file.begins_with(".") or file.get_extension().to_lower() != EXTENSION or file.length() > MAX_NAME + 6:
+		return null # Only a file next to this one: no folders.
+	var set_name := clean_name(str(e.get("name", file.get_basename())))
+	if base_dir != "":
+		var path := base_dir.path_join(file)
+		var vs: BlabberVocabulary = null
+		if path.begins_with("res://") and ResourceLoader.exists(path):
+			var res := ResourceLoader.load(path)
+			if res is BlabberVocabulary:
+				vs = res # Shared with every other voice that links to it.
+		if vs == null and FileAccess.file_exists(path):
+			var r := BlabberVocabulary.read(path)
+			if r.ok:
+				vs = r.vocabulary
+				if vs.resource_name == "":
+					vs.resource_name = set_name
+		if vs != null:
+			return vs
+	var stand_in := BlabberVocabulary.new()
+	stand_in.resource_name = set_name
+	stand_in.set_meta(LINK_META, file)
+	return stand_in
+
 
 static func _is_num(v) -> bool:
 	return typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT

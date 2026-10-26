@@ -9,6 +9,9 @@ signal opened(voice: BlabberVoice, voice_name: String)
 var get_voice: Callable
 ## Returns the current voice's name, used as the default name when saving.
 var get_name_hint: Callable
+## Returns a copy of a voice with its linked sets of recorded words replaced
+## by the sets themselves, for exports that carry copies. Optional.
+var resolve_sets: Callable
 ## Off: the app reads web file picks and dropped files and passes voice
 ## files to import_bytes().
 var handle_files := true
@@ -20,6 +23,7 @@ var open_button: Button
 var rename_button: Button
 var delete_button: Button
 var export_button: Button
+var copy_words_check: CheckButton
 var import_button: Button
 var status: Label
 var confirm: ConfirmationDialog
@@ -67,6 +71,11 @@ func _ready() -> void:
 	for b in [open_button, rename_button, delete_button, export_button]:
 		arow.add_child(b)
 	add_child(arow)
+	copy_words_check = CheckButton.new()
+	copy_words_check.text = "Exports carry copies of the recorded words"
+	copy_words_check.button_pressed = true
+	copy_words_check.tooltip_text = "On: an exported voice file has everything it needs.\nOff: it links to its sets of recorded words by name, so voices that share a set can share one file. Export the sets from the Vocabulary page and keep them in the same folder."
+	add_child(copy_words_check)
 
 	add_child(HSeparator.new())
 	add_child(_label("Other devices", 16, 1.0))
@@ -193,7 +202,8 @@ func _do_save(n: String) -> void:
 		# Asked on a tap, which is when browsers are most willing to agree.
 		BlabberLibrary.request_persistent_storage()
 		_asked_persist = true
-	var r := BlabberLibrary.save(get_voice.call(), n)
+	# Saved voices link to the editor's sets instead of copying them.
+	var r := BlabberLibrary.save(get_voice.call(), n, true)
 	if not r.ok:
 		status.text = r.error
 		return
@@ -252,7 +262,11 @@ func _export() -> void:
 		status.text = r.error
 		return
 	var file_name: String = r.name + "." + BlabberVoiceFile.EXTENSION
-	_export_bytes = BlabberVoiceFile.to_bytes(r.voice, r.name)
+	var copy := copy_words_check.button_pressed
+	var voice: BlabberVoice = r.voice
+	if copy and resolve_sets.is_valid():
+		voice = resolve_sets.call(voice)
+	_export_bytes = BlabberVoiceFile.to_bytes(voice, r.name, not copy)
 	if BlabberWeb.available():
 		BlabberWeb.download(_export_bytes, file_name)
 		status.text = "Downloaded %s. Import it on the other device." % file_name
@@ -301,13 +315,16 @@ func _import_bytes(bytes: PackedByteArray, file_name: String) -> void:
 	if not r.ok:
 		status.text = "%s: %s" % [file_name, r.error]
 		return
-	var saved := BlabberLibrary.save(r.voice, BlabberLibrary.unique_name(r.name))
+	var n := BlabberLibrary.unique_name(r.name)
+	# Opened first, so its recorded words join the editor's sets, which the
+	# saved voice then links to.
+	opened.emit(r.voice, n)
+	var saved := BlabberLibrary.save(r.voice, n, true)
 	if not saved.ok:
 		status.text = saved.error
 		return
 	refresh(saved.path)
 	name_edit.text = saved.name
-	opened.emit(r.voice, saved.name)
 	status.text = "Imported and opened \"%s\"." % saved.name
 
 
@@ -319,7 +336,10 @@ func _save_for_godot() -> void:
 	var n := _typed_name()
 	if n == "":
 		n = "voice"
-	var ext := "res" if voice.sample_bank else "tres"
+	var big := voice.sample_bank != null
+	for vs in voice.vocabularies:
+		big = big or not vs.lookup().is_empty()
+	var ext := "res" if big else "tres"
 	if BlabberWeb.available():
 		var tmp := "user://%s.%s" % [n, ext]
 		var err := ResourceSaver.save(voice, tmp)

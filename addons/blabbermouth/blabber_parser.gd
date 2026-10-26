@@ -219,14 +219,14 @@ static func _close_bb(stack: Array, key: String) -> String:
 
 ## Returns {segments, display_text, plain_text, visible}. "visible" is the number of
 ## visible characters, matching Label/RichTextLabel.visible_characters.
-## Words in the voice's vocabulary are spoken with one of their recordings;
+## Words in the voice's vocabularies are spoken with one of their recordings;
 ## take picks which one (for previews), -1 lets each word choose.
 static func build(text: String, voice: BlabberVoice, take := -1) -> Dictionary:
 	var scan := _scan(text)
 	var sentences := _group(scan.items)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(text) ^ (voice.language_seed * 7919)
-	var ctx := _vocab_context(voice.vocabulary, text, take)
+	var ctx := _vocab_context(voice.vocabularies, text, take)
 	var segs: Array = []
 	_push(segs, _silence(0.01, 0, segs))
 	for s in sentences:
@@ -996,13 +996,17 @@ static func _emit_word(w: Dictionary, voice: BlabberVoice, rng: RandomNumberGene
 
 # --- Recorded words (BlabberVocabulary) ----------------------------------------
 
-static func _vocab_context(vocab: BlabberVocabulary, text: String, take: int) -> Dictionary:
-	var ctx := {"vocab": {}, "longest": 0, "fit": true, "take": take, "last": {}}
-	if vocab == null:
+## sets: the voice's vocabularies, first one first. Each word keeps the
+## fit setting of the set it comes from.
+static func _vocab_context(sets: Array, text: String, take: int) -> Dictionary:
+	var ctx := {"vocab": {}, "fit": {}, "from": {}, "longest": 0, "take": take, "last": {}}
+	var found := BlabberVocabulary.lookup_sets(sets)
+	if found.is_empty():
 		return ctx
-	ctx.vocab = vocab.lookup()
-	ctx.fit = vocab.fit_to_voice
-	for k in ctx.vocab:
+	for k in found:
+		ctx.vocab[k] = found[k].word
+		ctx.fit[k] = found[k].vocabulary.fit_to_voice
+		ctx.from[k] = found[k].vocabulary
 		ctx.longest = maxi(ctx.longest, k.count(" ") + 1)
 	# Its own random numbers, so the rest of the line sounds the same either way.
 	var take_rng := RandomNumberGenerator.new()
@@ -1053,21 +1057,27 @@ static func _merge_recorded(tokens: Array, ctx: Dictionary) -> Array:
 	return out
 
 
-## The words and phrases in a line that a vocabulary (or a voice's
-## vocabulary) says with a recording: [{key, word, start, end}, ...], where
-## word is the BlabberWord and start and end are visible character positions.
-static func recorded_words(text: String, vocab_or_voice: Resource) -> Array:
-	var vocab: BlabberVocabulary = vocab_or_voice.vocabulary if vocab_or_voice is BlabberVoice else vocab_or_voice
+## The words and phrases in a line that are said with a recording:
+## [{key, word, vocabulary, start, end}, ...], where word is the BlabberWord,
+## vocabulary the set it comes from, and start and end are visible character
+## positions. source is a BlabberVoice, a BlabberVocabulary or an array of them.
+static func recorded_words(text: String, source) -> Array:
+	var sets: Array = []
+	if source is BlabberVoice:
+		sets = source.vocabularies
+	elif source is BlabberVocabulary:
+		sets = [source]
+	elif source is Array:
+		sets = source
 	var out: Array = []
-	if vocab == null:
-		return out
-	var ctx := _vocab_context(vocab, text, -1)
+	var ctx := _vocab_context(sets, text, -1)
 	if ctx.vocab.is_empty():
 		return out
 	for s in _group(_scan(text).items):
 		for tok in _merge_recorded(s.tokens, ctx):
 			if tok.has("vocab"):
-				out.append({"key": tok.key, "word": tok.vocab, "start": tok.idx[0], "end": tok.idx[-1] + 1})
+				out.append({"key": tok.key, "word": tok.vocab, "vocabulary": ctx.from[tok.key],
+					"start": tok.idx[0], "end": tok.idx[-1] + 1})
 	return out
 
 
@@ -1079,7 +1089,7 @@ static func _emit_recorded(w: Dictionary, voice: BlabberVoice, rng: RandomNumber
 	var st: Dictionary = w.st
 	var st_end: Dictionary = w.st_end
 	var emo := _mods(st)
-	var fit: bool = ctx.fit
+	var fit: bool = ctx.fit.get(w.key, true)
 	var speed: float = maxf((voice.speed if fit else 1.0) * st.speed * emo.get("speed", 1.0), 0.05)
 	var inton: float = voice.intonation * emo.get("intonation", 1.0)
 	var base: float = voice.pitch * st.pitch * emo.get("pitch", 1.0)
