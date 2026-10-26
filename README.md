@@ -10,8 +10,12 @@ own voice (or any sound) and it will talk with that instead.
 
 ## Try it in your browser
 
-The demo runs on the web, phones included: speak with the built-in voices,
-or record your voice (or load a voice memo) and make it talk.
+The demo is a line editor that runs on the web, phones included. Write a
+line, select words in the speaker's speech bubble and give them an effect
+(shout, whisper, shiver, wave, swell, bounce, droop, jolt, slow, fast, high,
+low, pause). The bubble shows the effect and the voice reads it that way.
+Switch the voice between the character's synth voice and your own recording,
+then export the line for a game or as a sound file.
 
 **Link:** https://wolfpox.github.io/blabbermouth/ (once Pages is turned on, see below).
 
@@ -54,8 +58,31 @@ await $Blabbermouth.finished
 The label is revealed in sync with the voice (a typewriter effect), so you don't
 need a separate timer.
 
-To try it, open this repo as a Godot project and run it. The demo is a voice
-designer with sliders, sample lines and a talking face.
+To try it, open this repo as a Godot project and run it. See
+[The editor](#the-editor) for what the demo does.
+
+## The editor
+
+The demo (`demo/`) is built around the speech bubble:
+
+- **Line**: the toolbar formats the selected words (or the whole line when
+  nothing is selected). Drag across words in the bubble, tap a word, or
+  select in the **Words** box. Click the name tag on the bubble to change
+  who says the line. Under the bubble, switch between **Synth voice** and
+  **My recording**. **How the voice reads it** lists every effect and what
+  it does to the voice; **Show tags** shows the tagged text a game gets.
+- **Characters**: eight starting characters, each with a voice and a bubble
+  style (font, colors, corners, outline, shadow, tail). Add, duplicate,
+  rename or delete them, and record a voice for each one.
+- **Voices**: save voices on this device and move them between devices.
+- **Export**: a `.blab` line file (text, effects and a copy of the speaker,
+  font included if you like) for Godot, or a `.wav` that plays anywhere.
+  **Open** loads a line file back into the editor.
+
+Your characters and the current line are saved on the device as you work
+(`user://editor.json`). The bubble fonts in `demo/fonts/` are open-source
+(SIL Open Font License, see `demo/fonts/licenses/`), so exported lines can
+carry them.
 
 ## Voices
 
@@ -92,7 +119,7 @@ v.growl = 0.4
 $Blabbermouth.speak("Mine! All mine!", v)
 ```
 
-Or tweak it in the demo, then in the **Library** tab press **Save .tres for Godot**.
+Or tweak it in the demo, then on the **Voices** page press **Save .tres for Godot**.
 
 ## Gibberish vs phonetic
 
@@ -113,7 +140,8 @@ gibberish with a matching rhythm.
 Record yourself, a friend, your cat, or load any WAV, OGG or MP3, and the
 engine speaks with those sounds instead of the synth.
 
-In the demo, open the **My voice** tab:
+In the demo, choose **My recording** under the bubble (or **Record their
+voice** on the Characters page):
 
 1. Press **Record** and read the nonsense line out loud (or make any noises),
    or press **Load file…**, or drop a file on the window.
@@ -122,8 +150,10 @@ In the demo, open the **My voice** tab:
    colors are bright "ee" sounds and warm colors are dark "oo" sounds; grey
    pieces have no clear pitch.
 3. Tap a piece to hear it. Turn on **Tap removes** to drop coughs and clicks.
-4. Pick a **Character** (as recorded, tiny critter, kid, giant…), then Speak.
-   **Save to library…** keeps it, recording included (see below).
+4. Press **Use this recording**. It plays at the character's Pitch and Size,
+   so one recording can be a tiny critter or a giant. Switch back to the
+   synth voice any time; the recording is kept. The **Voices** page saves
+   it to the library, recording included (see below).
 
 How it works:
 
@@ -182,7 +212,7 @@ for recorded voices, the recording. A `.blab` file can't contain code, so
 it's safe to open one someone else made. Don't share `.tres` or `.res`
 files with people you don't trust: Godot resources can run code when loaded.
 
-In the demo, the **Library** tab saves, opens, renames and deletes voices
+In the demo, the **Voices** page saves, opens, renames and deletes voices
 on this device. To move a voice to another device or browser, **Export**
 it, send the file however you like, and **Import** it on the other side
 (on desktop you can also drop a `.blab` file on the window).
@@ -394,5 +424,6 @@ godot --headless --path . -s tools/test_voice_file.gd           # .blab files an
 godot --headless --path . -s tools/test_signals.gd              # finished / interrupted (exits 1 on failure)
 godot --headless --path . -s tools/test_g2p.gd                  # letters-to-sounds rules (exits 1 on failure)
 godot --headless --path . -s tools/test_lines.gd                # effects, line files, dialogue bubble (exits 1 on failure)
+godot --headless --path . -s tools/test_editor.gd               # the demo editor: formatting, characters, export (exits 1 on failure)
 godot --headless --path . -s tools/make_sample_line.gd          # regenerate demo/lines/hello_traveler.blab
 ```

@@ -1,268 +1,212 @@
 extends Control
-## Voice designer demo. Pick a preset, tweak sliders, type a line, press Speak.
+## Blabbermouth's editor: write a line, style the words in the speaker's
+## bubble, hear it, and export it for a game (or as a sound file).
 
-const LINES := [
-	"Hello there, traveler! Have you seen my little lantern? It was right here... I swear.",
-	"[emote=scared]W-what was that noise?[/emote] [pause=0.4]Probably nothing. Probably.",
-	"[shout]GET OUT OF MY SWAMP![/shout] [emote=sad]...unless you brought snacks.",
-	"[whisper]Psst. The king is a frog.[/whisper] [speed=1.6]Don't tell anyone I told you!",
-	"The [b]Crystal of Ages[/b] lies beyond the mountains. Will you go, [emote=excited]Hero?",
-]
-
-## [property, min, max, step]
-const SLIDERS := [
-	["pitch", 30.0, 1200.0, 1.0],
-	["formant_scale", 0.4, 2.5, 0.01],
-	["speed", 0.3, 3.0, 0.01],
-	["intonation", 0.0, 12.0, 0.1],
-	["pitch_variation", 0.0, 8.0, 0.1],
-	["articulation", 0.0, 1.0, 0.01],
-	["sibilance", 0.0, 2.0, 0.01],
-	["tenseness", 0.0, 1.0, 0.01],
-	["breathiness", 0.0, 1.0, 0.01],
-	["roughness", 0.0, 1.0, 0.01],
-	["growl", 0.0, 1.0, 0.01],
-	["jitter", 0.0, 0.1, 0.001],
-	["vibrato_depth", 0.0, 2.0, 0.01],
-	["ring_mod_mix", 0.0, 1.0, 0.01],
-	["volume", 0.0, 2.0, 0.01],
-]
-
-const PRESET_COLORS := {
-	"critter": Color(0.98, 0.78, 0.35), "child": Color(0.55, 0.85, 0.95),
-	"woman": Color(0.95, 0.55, 0.7), "man": Color(0.5, 0.7, 0.95),
-	"elder": Color(0.75, 0.75, 0.7), "goblin": Color(0.55, 0.85, 0.4),
-	"monster": Color(0.6, 0.35, 0.75), "robot": Color(0.7, 0.8, 0.85),
-}
-
-var blab: Blabbermouth
-var voice: BlabberVoice
-var preset_name := "man"
-var sliders := {}
-var value_labels := {}
-var preset_opt: OptionButton
-var mode_check: CheckButton
-var names_check: CheckButton
-var text_edit: TextEdit
-var speech: RichTextLabel
-var status: Label
-var face: Face
-var playing_all := false
-var studio: SampleStudio
-var library: LibraryPanel
-var library_scroll: ScrollContainer
-var root: BoxContainer
-var tabs: TabContainer
-var right: VBoxContainer
-var help: Label
-var margin: MarginContainer
-
-const SampleStudio := preload("res://demo/sample_studio.gd")
+const Ui := preload("res://demo/ui.gd")
+const Clickable := preload("res://demo/clickable.gd")
+const Sheet := preload("res://demo/sheet.gd")
+const Cast := preload("res://demo/cast.gd")
+const LinePage := preload("res://demo/line_page.gd")
+const CastPage := preload("res://demo/cast_page.gd")
 const LibraryPanel := preload("res://demo/library_panel.gd")
+const SampleStudio := preload("res://demo/sample_studio.gd")
 
+## Where the editor keeps its characters and line. Tests point it elsewhere.
+var save_path := Cast.SAVE_PATH
+## Lay out as if the window were this size (for tests, where it can't change).
+var test_size := Vector2i.ZERO
+var members: Array = []
+var current := 0
 
-class Face extends Control:
-	var openness := 0.0
-	var body_color := Color.WHITE
-	var blink := 0.0
-
-	func _process(delta: float) -> void:
-		blink = maxf(blink - delta, 0.0)
-		if randf() < delta * 0.4:
-			blink = 0.12
-		queue_redraw()
-
-	func _draw() -> void:
-		var c := size / 2.0
-		var r := minf(size.x, size.y) * 0.42
-		draw_circle(c, r, body_color)
-		var eye_y := c.y - r * 0.25
-		for side in [-1.0, 1.0]:
-			var e := Vector2(c.x + side * r * 0.35, eye_y)
-			if blink > 0.0:
-				draw_line(e - Vector2(r * 0.1, 0), e + Vector2(r * 0.1, 0), Color(0.1, 0.1, 0.12), 4.0)
-			else:
-				draw_circle(e, r * 0.11, Color.WHITE)
-				draw_circle(e + Vector2(0, r * 0.02), r * 0.06, Color(0.1, 0.1, 0.12))
-		# Mouth: an ellipse that opens with the voice.
-		var mouth_c := Vector2(c.x, c.y + r * 0.35)
-		var w := r * (0.42 - openness * 0.1)
-		var h := r * (0.04 + openness * 0.3)
-		var pts := PackedVector2Array()
-		for i in 24:
-			var a := TAU * i / 24.0
-			pts.append(mouth_c + Vector2(cos(a) * w, sin(a) * h))
-		draw_colored_polygon(pts, Color(0.25, 0.05, 0.08))
+var margin: MarginContainer
+var header: BoxContainer
+var nav: HBoxContainer
+var tabs := {}
+var open_button: Button
+var export_button: Button
+var scroll: ScrollContainer
+var pages: VBoxContainer
+var line_page: LinePage
+var cast_page: CastPage
+var voices_page: VBoxContainer
+var library: LibraryPanel
+var status: Label
+var menu: Control
+var record_sheet: Sheet
+var studio: SampleStudio
+var use_recording_button: Button
+var record_hint: Label
+var export_sheet: Sheet
+var export_font_check: CheckButton
+var export_status: Label
+var export_note: Label
+var confirm: ConfirmationDialog
+var _sample_i := -1
+var _save_timer: Timer
+var _dialog: FileDialog
+var _status_timer: Timer
 
 
 func _ready() -> void:
+	theme = Ui.make_theme()
 	var bg := ColorRect.new()
-	bg.color = Color(0.11, 0.12, 0.15)
+	bg.color = Ui.BG
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 
-	margin = MarginContainer.new()
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 16)
-	add_child(margin)
-	root = BoxContainer.new()
-	root.add_theme_constant_override("separation", 12)
-	margin.add_child(root)
-
-	# Left: tabs for the synth voice and the sample (recorded) voice.
-	tabs = TabContainer.new()
-	tabs.custom_minimum_size = Vector2(400, 0)
-	root.add_child(tabs)
-	var scroll := ScrollContainer.new()
-	scroll.name = "Voice"
+	scroll = ScrollContainer.new()
+	scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	tabs.add_child(scroll)
-	var sample_scroll := ScrollContainer.new()
-	sample_scroll.name = "My voice"
-	sample_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	tabs.add_child(sample_scroll)
-	library_scroll = ScrollContainer.new()
-	library_scroll.name = "Library"
-	library_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	tabs.add_child(library_scroll)
+	add_child(scroll)
+	margin = MarginContainer.new()
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(margin)
+	var col := Ui.vbox(20)
+	margin.add_child(col)
+	col.add_child(_header())
+	status = Ui.label("", 14, Ui.ACCENT)
+	status.visible = false
+	col.add_child(status)
+	pages = Ui.vbox(0)
+	col.add_child(pages)
+
+	line_page = LinePage.new()
+	pages.add_child(line_page)
+	line_page.edited.connect(save_soon)
+	line_page.pick_speaker.connect(_open_menu)
+	line_page.record_pressed.connect(_open_recorder)
+	line_page.more_pressed.connect(func() -> void: show_page("cast"))
+	line_page.speaker_changed.connect(func(_what: String) -> void: save_soon())
+	line_page.sample_pressed.connect(_next_sample)
+
+	cast_page = CastPage.new()
+	pages.add_child(cast_page)
+	cast_page.picked.connect(set_current)
+	cast_page.add_pressed.connect(_add_member)
+	cast_page.duplicate_pressed.connect(_duplicate_member)
+	cast_page.delete_pressed.connect(_delete_member)
+	cast_page.record_pressed.connect(_open_recorder)
+	cast_page.speaker_changed.connect(func(_what: String) -> void:
+		line_page.refresh_speaker()
+		save_soon())
+
+	voices_page = Ui.vbox(16)
+	pages.add_child(voices_page)
+	voices_page.add_child(Ui.heading("Voices", 26))
+	voices_page.add_child(Ui.label("Save a character's voice on this device, or move voices between devices as .blab voice files. Opening a voice gives it to the current character.", 14, Ui.DIM))
+	var lib_panel := Ui.panel(Ui.PANEL, 28, 24, 24)
+	voices_page.add_child(lib_panel)
 	library = LibraryPanel.new()
-	library.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	library.get_voice = func() -> BlabberVoice: return voice
-	library.get_name_hint = func() -> String: return preset_name.capitalize() if preset_name in BlabberVoice.PRESET_NAMES else preset_name
+	library.handle_files = false
+	library.get_voice = func() -> BlabberVoice: return member().speaker.voice
+	library.get_name_hint = func() -> String: return member().speaker.display_name
 	library.opened.connect(_open_voice)
-	library_scroll.add_child(library)
-	studio = SampleStudio.new()
-	studio.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	sample_scroll.add_child(studio)
-	studio.changed.connect(_apply_samples)
-	var panel := VBoxContainer.new()
-	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(panel)
+	lib_panel.add_child(library)
 
-	panel.add_child(_title("Voice"))
-	panel.add_child(_hint("With \"My voice\" on, Pitch and Formant Scale change your recording, and the rest sets the delivery."))
-	preset_opt = OptionButton.new()
-	for n in BlabberVoice.PRESET_NAMES:
-		preset_opt.add_item(n.capitalize())
-	preset_opt.item_selected.connect(func(i: int) -> void: _load_preset(BlabberVoice.PRESET_NAMES[i]))
-	panel.add_child(preset_opt)
+	_build_menu()
+	_build_recorder()
+	_build_export()
+	confirm = ConfirmationDialog.new()
+	add_child(confirm)
 
-	mode_check = CheckButton.new()
-	mode_check.text = "Follow the letters (phonetic)"
-	mode_check.toggled.connect(func(on: bool) -> void:
-		voice.mode = BlabberVoice.Mode.PHONETIC if on else BlabberVoice.Mode.GIBBERISH
-		names_check.disabled = on)
-	panel.add_child(mode_check)
-	names_check = CheckButton.new()
-	names_check.text = "Say capitalized names clearly"
-	names_check.tooltip_text = "For gibberish. Phonetic already says every word, names included."
-	names_check.toggled.connect(func(on: bool) -> void: voice.speak_names = on)
-	panel.add_child(names_check)
+	_save_timer = Timer.new()
+	_save_timer.one_shot = true
+	_save_timer.wait_time = 0.8
+	_save_timer.timeout.connect(save_now)
+	add_child(_save_timer)
+	_status_timer = Timer.new()
+	_status_timer.one_shot = true
+	_status_timer.wait_time = 6.0
+	_status_timer.timeout.connect(func() -> void: status.visible = false)
+	add_child(_status_timer)
 
-	for spec in SLIDERS:
-		var prop: String = spec[0]
-		var row := HBoxContainer.new()
-		var name_label := Label.new()
-		name_label.text = prop.capitalize()
-		name_label.custom_minimum_size = Vector2(130, 0)
-		row.add_child(name_label)
-		var slider := HSlider.new()
-		slider.min_value = spec[1]
-		slider.max_value = spec[2]
-		slider.step = spec[3]
-		slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		slider.value_changed.connect(func(v: float) -> void:
-			voice.set(prop, v)
-			value_labels[prop].text = _fmt(v))
-		row.add_child(slider)
-		var vl := Label.new()
-		vl.custom_minimum_size = Vector2(52, 0)
-		vl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		row.add_child(vl)
-		sliders[prop] = slider
-		value_labels[prop] = vl
-		panel.add_child(row)
-
-	var save_row := HFlowContainer.new()
-	save_row.add_child(_button("Save to library…", _save_voice))
-	save_row.add_child(_button("Download line .wav" if BlabberWeb.available() else "Bake line .wav", _bake_line))
-	panel.add_child(save_row)
-	status = Label.new()
-	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	status.modulate = Color(1, 1, 1, 0.6)
-	panel.add_child(status)
-
-	# Right: character, speech bubble, input.
-	right = VBoxContainer.new()
-	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right.add_theme_constant_override("separation", 10)
-	root.add_child(right)
-
-	face = Face.new()
-	face.custom_minimum_size = Vector2(0, 220)
-	face.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	right.add_child(face)
-
-	speech = RichTextLabel.new()
-	speech.bbcode_enabled = true
-	speech.fit_content = true
-	speech.custom_minimum_size = Vector2(0, 90)
-	speech.add_theme_font_size_override("normal_font_size", 22)
-	speech.add_theme_font_size_override("bold_font_size", 22)
-	right.add_child(speech)
-
-	text_edit = TextEdit.new()
-	text_edit.text = LINES[0]
-	text_edit.custom_minimum_size = Vector2(0, 90)
-	text_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-	right.add_child(text_edit)
-
-	var buttons := HFlowContainer.new()
-	buttons.add_child(_button("Speak", _speak))
-	buttons.add_child(_button("Skip", func() -> void: blab.skip()))
-	buttons.add_child(_button("Next sample line", _next_line))
-	buttons.add_child(_button("Play every voice", _play_all))
-	right.add_child(buttons)
-
-	help = Label.new()
-	help.text = "Tags: [pause=0.5] [speed=1.5] [pitch=1.2] [volume=0.5] [emote=happy|excited|angry|sad|scared] [whisper] [shout] [reset]"
-	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	help.modulate = Color(1, 1, 1, 0.5)
-	right.add_child(help)
-
-	blab = Blabbermouth.new()
-	blab.label = speech
-	add_child(blab)
-	blab.mouth_moved.connect(func(o: float) -> void: face.openness = o)
-
+	var st := Cast.load_state(save_path)
+	if st.is_empty():
+		members = Cast.defaults()
+		current = 0
+		line_page.set_member(members[0])
+		line_page.load_source(Cast.SAMPLES[0][1])
+		_sample_i = 0
+	else:
+		members = st.members
+		current = st.current
+		line_page.set_member(members[current])
+		line_page.load_source(st.line)
+	show_page("line")
 	get_window().size_changed.connect(_layout)
-	_layout()
-	preset_opt.select(BlabberVoice.PRESET_NAMES.find(preset_name))
-	_load_preset(preset_name)
+	get_window().files_dropped.connect(_on_files_dropped)
+	_layout.call_deferred()
+	set_process(BlabberWeb.available())
 
 
-func _title(t: String) -> Label:
-	var l := Label.new()
-	l.text = t
-	l.add_theme_font_size_override("font_size", 20)
-	return l
+func member() -> Cast.Member:
+	return members[current]
 
 
-func _button(t: String, cb: Callable) -> Button:
-	var b := Button.new()
-	b.text = t
-	b.pressed.connect(cb)
-	return b
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST and _save_timer and not _save_timer.is_stopped():
+		save_now()
 
 
-func _fmt(v: float) -> String:
-	return str(snappedf(v, 0.001))
+# --- Layout --------------------------------------------------------------------
+
+func _header() -> Control:
+	header = BoxContainer.new()
+	header.add_theme_constant_override("separation", 16)
+	var top := Ui.hbox(28)
+	var brand := Ui.hbox(10)
+	var logo := TextureRect.new()
+	logo.texture = Ui.icon("logo")
+	logo.modulate = Ui.ACCENT
+	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	logo.custom_minimum_size = Vector2(30, 30)
+	brand.add_child(logo)
+	var name_l := Ui.heading("Blabbermouth", 21)
+	name_l.name = "Title"
+	brand.add_child(name_l)
+	brand.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	top.add_child(brand)
+	nav = Ui.hbox(4)
+	var group := ButtonGroup.new()
+	for t in [["line", "Line"], ["cast", "Characters"], ["voices", "Voices"]]:
+		var b := Button.new()
+		b.text = t[1]
+		b.toggle_mode = true
+		b.button_group = group
+		b.theme_type_variation = "Tab"
+		b.custom_minimum_size.y = 46
+		b.pressed.connect(show_page.bind(t[0]))
+		nav.add_child(b)
+		tabs[t[0]] = b
+	top.add_child(nav)
+	header.add_child(top)
+	var actions := Ui.hbox(8)
+	actions.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	actions.alignment = BoxContainer.ALIGNMENT_END
+	open_button = Ui.button("Open", _open_pressed, "open")
+	open_button.tooltip_text = "Open a .blab line file"
+	actions.add_child(open_button)
+	export_button = Ui.button("Export", _open_export, "export", "Raised")
+	actions.add_child(export_button)
+	header.add_child(actions)
+	return header
 
 
-## Sharp, readable UI on high-density screens, and a stacked layout on
-## narrow (phone) screens.
+func show_page(page: String) -> void:
+	line_page.visible = page == "line"
+	cast_page.visible = page == "cast"
+	voices_page.visible = page == "voices"
+	for k in tabs:
+		tabs[k].set_pressed_no_signal(k == page)
+	if page == "cast":
+		cast_page.show_cast(members, current)
+	elif page == "line":
+		line_page.refresh_speaker()
+	scroll.scroll_vertical = 0
+
+
+## Sharp on dense screens; the side panel moves below on narrow ones.
 func _layout() -> void:
 	var win := get_window()
 	var scale := DisplayServer.screen_get_scale()
@@ -273,114 +217,431 @@ func _layout() -> void:
 	scale = clampf(scale, 1.0, 3.0)
 	win.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
 	win.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
-	win.content_scale_size = Vector2i(Vector2(win.size) / scale)
-	var width := win.size.x / scale
-	var portrait := width < 760.0
-	root.vertical = portrait
-	var pad := 8 if portrait else 16
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, pad)
-	if portrait:
-		root.move_child(right, 0)
-		tabs.custom_minimum_size = Vector2.ZERO
-		tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		right.size_flags_vertical = Control.SIZE_FILL
-		face.custom_minimum_size = Vector2(0, 120)
-		face.size_flags_vertical = Control.SIZE_FILL
-		speech.custom_minimum_size = Vector2(0, 56)
-		text_edit.custom_minimum_size = Vector2(0, 64)
-		help.visible = false
-	else:
-		root.move_child(tabs, 0)
-		tabs.custom_minimum_size = Vector2(400, 0)
-		tabs.size_flags_vertical = Control.SIZE_FILL
-		right.size_flags_vertical = Control.SIZE_FILL
-		face.custom_minimum_size = Vector2(0, 220)
-		face.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		speech.custom_minimum_size = Vector2(0, 90)
-		text_edit.custom_minimum_size = Vector2(0, 90)
-		help.visible = true
+	var win_size := test_size if test_size != Vector2i.ZERO else win.size
+	win.content_scale_size = Vector2i(Vector2(win_size) / scale)
+	var width := win_size.x / scale
+	var phone := width < 640.0
+	var pad := 12 if phone else 32
+	var side := maxi(pad, int(width - 1440) / 2)
+	margin.add_theme_constant_override("margin_left", side)
+	margin.add_theme_constant_override("margin_right", side)
+	margin.add_theme_constant_override("margin_top", 8 if phone else 16)
+	margin.add_theme_constant_override("margin_bottom", 48)
+	header.vertical = width < 760.0
+	nav.add_theme_constant_override("separation", 0 if phone else 4)
+	header.get_child(0).add_theme_constant_override("separation", 12 if phone else 28)
+	header.find_child("Title", true, false).visible = width >= 400.0
+	for t in tabs.values():
+		var st := Ui.box(Ui.CLEAR, 0, Ui.CLEAR, 0, 10 if phone else 16, 10)
+		t.add_theme_stylebox_override("normal", st)
+		t.add_theme_stylebox_override("hover", st)
+		var on := st.duplicate() as StyleBoxFlat
+		on.border_color = Ui.ACCENT
+		on.border_width_bottom = 2
+		t.add_theme_stylebox_override("pressed", on)
+		t.add_theme_stylebox_override("hover_pressed", on)
+	var narrow := width < 1060.0
+	line_page.set_narrow(narrow, phone)
+	cast_page.set_narrow(width < 980.0, phone)
 
 
-func _hint(t: String) -> Label:
-	var l := Label.new()
-	l.text = t
-	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	l.add_theme_font_size_override("font_size", 13)
-	l.modulate = Color(1, 1, 1, 0.5)
-	return l
+# --- Characters ----------------------------------------------------------------
+
+func set_current(i: int) -> void:
+	current = clampi(i, 0, members.size() - 1)
+	line_page.set_member(member())
+	if cast_page.visible:
+		cast_page.show_cast(members, current)
+	save_soon()
 
 
-func _apply_samples() -> void:
-	studio.apply_to(voice)
-	_refresh_sliders()
+func _add_member() -> void:
+	var m := Cast.make_new(Cast.unique_name(members, "New character"), "man", members.size())
+	members.append(m)
+	set_current(members.size() - 1)
+	show_page("cast")
+	cast_page.focus_name()
 
 
-func _load_preset(n: String) -> void:
-	preset_name = n
-	voice = BlabberVoice.preset(n)
-	studio.apply_to(voice)
-	_refresh_sliders()
-	face.body_color = PRESET_COLORS.get(n, Color.WHITE)
+func _duplicate_member() -> void:
+	var m := Cast.copy_member(member(), Cast.unique_name(members, member().speaker.display_name))
+	members.insert(current + 1, m)
+	set_current(current + 1)
+	cast_page.show_cast(members, current)
+	cast_page.focus_name()
 
 
-func _refresh_sliders() -> void:
-	for prop in sliders:
-		sliders[prop].set_value_no_signal(voice.get(prop))
-		value_labels[prop].text = _fmt(voice.get(prop))
-	mode_check.set_pressed_no_signal(voice.mode == BlabberVoice.Mode.PHONETIC)
-	names_check.set_pressed_no_signal(voice.speak_names)
-	names_check.disabled = voice.mode == BlabberVoice.Mode.PHONETIC
-
-
-func _speak() -> void:
-	playing_all = false # Speaking by hand stops "Play every voice".
-	blab.speak(text_edit.text, voice)
-
-
-func _next_line() -> void:
-	var i := (LINES.find(text_edit.text) + 1) % LINES.size()
-	text_edit.text = LINES[i]
-	_speak()
-
-
-func _play_all() -> void:
-	if playing_all:
+func _delete_member() -> void:
+	if members.size() <= 1:
 		return
-	playing_all = true
-	for n in BlabberVoice.PRESET_NAMES:
-		preset_opt.select(BlabberVoice.PRESET_NAMES.find(n))
-		_load_preset(n)
-		blab.speak(text_edit.text, voice)
-		await blab.finished
-		await get_tree().create_timer(0.3).timeout
-		if not playing_all:
-			return
-	playing_all = false
+	var n: String = member().speaker.display_name
+	_ask("Delete %s? Lines you already exported keep their own copy." % n, "Delete", func() -> void:
+		members.remove_at(current)
+		set_current(mini(current, members.size() - 1))
+		cast_page.show_cast(members, current)
+		_say("Deleted %s." % n))
 
 
-func _save_voice() -> void:
-	tabs.current_tab = library_scroll.get_index()
-	library.focus_name(library.get_name_hint.call())
-
-
-## A voice opened or imported in the Library tab becomes the current voice.
 func _open_voice(v: BlabberVoice, voice_name: String) -> void:
-	voice = v
-	preset_name = voice_name
-	preset_opt.select(-1)
-	studio.show_voice(voice)
-	_refresh_sliders()
-	face.body_color = Color.from_hsv(float(absi(hash(voice_name)) % 360) / 360.0, 0.45, 0.95)
-
-
-func _bake_line() -> void:
-	var path := "user://%s_line.wav" % preset_name
-	var err := Blabbermouth.bake(text_edit.text, voice).save_to_wav(path)
-	if err != OK:
-		status.text = "Bake failed (%s)" % error_string(err)
-	elif BlabberWeb.available():
-		BlabberWeb.download(FileAccess.get_file_as_bytes(path), path.get_file(), "audio/wav")
-		status.text = "Downloaded " + path.get_file()
+	var m := member()
+	m.speaker.voice = v
+	if v.sample_bank:
+		m.recording = v.sample_bank
+		m.set_use_recording(true)
 	else:
-		status.text = "Baked " + ProjectSettings.globalize_path(path)
+		m.set_use_recording(false)
+	line_page.refresh_speaker()
+	save_soon()
+	_say("%s now speaks with “%s”." % [m.speaker.display_name, voice_name])
+
+
+func _next_sample() -> void:
+	_sample_i = (_sample_i + 1) % Cast.SAMPLES.size()
+	var s: Array = Cast.SAMPLES[_sample_i]
+	for i in members.size():
+		if members[i].speaker.display_name == s[0]:
+			set_current(i)
+			break
+	line_page.load_source(s[1])
+
+
+# --- Speaker menu ---------------------------------------------------------------
+
+func _build_menu() -> void:
+	menu = Control.new()
+	menu.set_anchors_preset(Control.PRESET_FULL_RECT)
+	menu.visible = false
+	menu.mouse_filter = Control.MOUSE_FILTER_STOP
+	menu.gui_input.connect(func(e: InputEvent) -> void:
+		if e is InputEventMouseButton and e.pressed:
+			menu.visible = false)
+	add_child(menu)
+
+
+func _open_menu(anchor: Control) -> void:
+	for c in menu.get_children():
+		c.queue_free()
+	var p := PanelContainer.new()
+	var st := Ui.box(Color("1c1e25"), 20, Ui.LINE, 1, 14, 14)
+	st.shadow_color = Color(0, 0, 0, 0.5)
+	st.shadow_size = 24
+	st.shadow_offset = Vector2(0, 12)
+	p.add_theme_stylebox_override("panel", st)
+	var v := Ui.vbox(12)
+	p.add_child(v)
+	v.add_child(Ui.eyebrow("Who says this line"))
+	var avail := size.x - 24.0
+	var cols := 2 if avail > 420.0 else 1
+	var grid := GridContainer.new()
+	grid.columns = cols
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
+	var w := minf(480.0, avail)
+	for i in members.size():
+		var c := CastPage.card(members[i], i == current, (w - 28.0 - 10.0 * (cols - 1)) / cols)
+		c.pressed.connect(func() -> void:
+			menu.visible = false
+			set_current(i))
+		grid.add_child(c)
+	v.add_child(grid)
+	var add := Ui.button("New character…", func() -> void:
+		menu.visible = false
+		_add_member(), "plus", "Link")
+	add.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	v.add_child(add)
+	menu.add_child(p)
+	p.custom_minimum_size.x = w
+	p.modulate.a = 0.0 # Shown once it's in place, next frame.
+	menu.visible = true
+	menu.move_to_front()
+	await get_tree().process_frame
+	var r := anchor.get_global_rect()
+	var pos := Vector2(r.position.x, r.end.y + 8.0)
+	pos.x = clampf(pos.x, 12.0, maxf(12.0, size.x - p.size.x - 12.0))
+	if pos.y + p.size.y > size.y - 12.0:
+		pos.y = maxf(12.0, r.position.y - p.size.y - 8.0)
+	p.position = pos
+	p.modulate.a = 1.0
+	if grid.get_child_count() > current:
+		grid.get_child(current).grab_focus()
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if menu.visible and event.is_action_pressed("ui_cancel"):
+		menu.visible = false
+		get_viewport().set_input_as_handled()
+
+
+# --- Recording ------------------------------------------------------------------
+
+func _build_recorder() -> void:
+	record_sheet = Sheet.new("Record a voice", 620)
+	add_child(record_sheet)
+	record_hint = Ui.label("", 14, Ui.DIM)
+	record_sheet.body.add_child(record_hint)
+	studio = SampleStudio.new()
+	studio.show_voice_options = false
+	studio.handle_drops = false
+	record_sheet.body.add_child(studio)
+	var row := HFlowContainer.new()
+	row.add_theme_constant_override("h_separation", 10)
+	row.add_theme_constant_override("v_separation", 10)
+	use_recording_button = Ui.button("Use this recording", _use_studio_recording, "", "Primary")
+	row.add_child(use_recording_button)
+	row.add_child(Ui.button("Cancel", record_sheet.close))
+	record_sheet.body.add_child(row)
+	studio.changed.connect(func() -> void: use_recording_button.disabled = studio.bank == null or studio.bank.active_count() == 0)
+
+
+func _open_recorder() -> void:
+	var m := member()
+	record_sheet.title_label.text = "Record a voice for %s" % m.speaker.display_name
+	record_hint.text = "Read the prompt or make any noises. Blabbermouth cuts the sound into syllables and plays them back at %s’s pitch (%d Hz) and size, so it fits the character." % [m.speaker.display_name, roundi(m.speaker.voice.pitch)]
+	studio.reset_for(m.speaker.voice, m.recording)
+	use_recording_button.disabled = studio.bank == null
+	record_sheet.open()
+
+
+func _use_studio_recording() -> void:
+	if studio.bank == null or studio.bank.active_count() == 0:
+		return
+	var m := member()
+	m.recording = studio.bank
+	m.speaker.voice.sample_melody = studio.melody
+	m.speaker.voice.sample_variety = studio.variety
+	m.set_use_recording(true)
+	record_sheet.close()
+	line_page.refresh_speaker()
+	if cast_page.visible:
+		cast_page.show_cast(members, current)
+	save_soon()
+	_say("%s now speaks with your recording. Switch back any time under the bubble." % m.speaker.display_name)
+
+
+# --- Export and open ---------------------------------------------------------------
+
+func _build_export() -> void:
+	export_sheet = Sheet.new("Export", 600)
+	add_child(export_sheet)
+	var b := export_sheet.body
+	var game := Ui.panel(Ui.CARD, 18, 18, 16)
+	var gv := Ui.vbox(10)
+	game.add_child(gv)
+	gv.add_child(Ui.heading("Line file for games (.blab)"))
+	gv.add_child(Ui.label("The words with their effects, plus a copy of the speaker: voice, bubble and font. A Godot project with the Blabbermouth plugin loads it as a BlabberLine, and can use the voice, the text styling and the bubble together or one at a time.", 14, Ui.DIM))
+	var code := Ui.label("$Dialogue.say(load(\"res://lines/my_line.blab\"))", 13, Ui.TEXT_2)
+	code.add_theme_font_override("font", Ui.FONT_MONO)
+	gv.add_child(code)
+	export_font_check = CheckButton.new()
+	export_font_check.button_pressed = true
+	gv.add_child(export_font_check)
+	gv.add_child(Ui.button("Save line file" if not BlabberWeb.available() else "Download line file", _export_line, "export", "Primary"))
+	b.add_child(game)
+	var sound := Ui.panel(Ui.CARD, 18, 18, 16)
+	var sv := Ui.vbox(10)
+	sound.add_child(sv)
+	sv.add_child(Ui.heading("Sound file (.wav)"))
+	export_note = Ui.label("", 14, Ui.DIM)
+	sv.add_child(export_note)
+	sv.add_child(Ui.button("Save sound" if not BlabberWeb.available() else "Download sound", _export_wav, "export"))
+	b.add_child(sound)
+	export_status = Ui.label("", 14, Ui.ACCENT)
+	b.add_child(export_status)
+
+
+func _open_export() -> void:
+	var m := member()
+	var font: Font = m.speaker.bubble.font
+	var kb := 0
+	var base: Font = font
+	while base is FontVariation and base.base_font:
+		base = base.base_font
+	if base is FontFile:
+		kb = ceili(base.data.size() * 4.0 / 3.0 / 1024.0)
+	export_font_check.text = "Include the font (+%d KB), so the bubble looks the same in any game" % kb if kb > 0 else "Include the font"
+	export_font_check.disabled = kb == 0
+	export_note.text = "%s saying the line, as audio that plays anywhere: other engines, video editors, or a game without Blabbermouth." % m.speaker.display_name
+	export_status.text = ""
+	export_sheet.open()
+
+
+## The line file's contents for the current line and speaker.
+func line_file_bytes(embed_font: bool) -> PackedByteArray:
+	return BlabberLineFile.to_bytes(BlabberLine.create(line_page.model.to_source(), member().speaker), embed_font)
+
+
+func _file_stem() -> String:
+	var who: String = member().speaker.display_name.to_lower().replace(" ", "_")
+	var words: PackedStringArray = []
+	for w in line_page.model.text.split(" ", false):
+		var clean := ""
+		for c in w.to_lower():
+			if (c >= "a" and c <= "z") or (c >= "0" and c <= "9"):
+				clean += c
+		if clean != "":
+			words.append(clean)
+		if words.size() >= 3:
+			break
+	var stem := BlabberVoiceFile.clean_name(who + ("_" + "_".join(words) if not words.is_empty() else ""))
+	return stem if stem != "" else "line"
+
+
+func _export_line() -> void:
+	var bytes := line_file_bytes(export_font_check.button_pressed and not export_font_check.disabled)
+	_save_bytes(bytes, _file_stem() + ".blab", "*.blab ; Blabbermouth line", "application/json")
+
+
+func _export_wav() -> void:
+	if line_page.model.text.strip_edges() == "":
+		export_status.text = "Type a line first."
+		return
+	var tmp := "user://export_tmp.wav"
+	var err := line_page.current_line().bake().save_to_wav(tmp)
+	if err != OK:
+		export_status.text = "Couldn't make the sound (%s)." % error_string(err)
+		return
+	var bytes := FileAccess.get_file_as_bytes(tmp)
+	DirAccess.remove_absolute(tmp)
+	_save_bytes(bytes, _file_stem() + ".wav", "*.wav ; WAV sound", "audio/wav")
+
+
+func _save_bytes(bytes: PackedByteArray, file_name: String, filter: String, mime: String) -> void:
+	if BlabberWeb.available():
+		BlabberWeb.download(bytes, file_name, mime)
+		export_status.text = "Downloaded %s." % file_name
+		return
+	var d := _file_dialog(FileDialog.FILE_MODE_SAVE_FILE, filter)
+	d.current_file = file_name
+	d.file_selected.connect(func(path: String) -> void:
+		var f := FileAccess.open(path, FileAccess.WRITE)
+		if f == null:
+			export_status.text = "Couldn't save %s (%s)." % [path.get_file(), error_string(FileAccess.get_open_error())]
+			return
+		f.store_buffer(bytes)
+		f.close()
+		export_status.text = "Saved " + path, CONNECT_ONE_SHOT)
+	d.popup_centered_ratio(0.7)
+
+
+func _file_dialog(mode: FileDialog.FileMode, filter: String) -> FileDialog:
+	if _dialog:
+		_dialog.queue_free()
+	_dialog = FileDialog.new()
+	_dialog.file_mode = mode
+	_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_dialog.use_native_dialog = true
+	_dialog.filters = PackedStringArray([filter])
+	add_child(_dialog)
+	return _dialog
+
+
+func _open_pressed() -> void:
+	if BlabberWeb.available():
+		return # The file input laid over the button opens the picker.
+	var d := _file_dialog(FileDialog.FILE_MODE_OPEN_FILE, "*.blab ; Blabbermouth line or voice")
+	d.file_selected.connect(_open_path, CONNECT_ONE_SHOT)
+	d.popup_centered_ratio(0.7)
+
+
+func _open_path(path: String) -> void:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		_say("Couldn't open %s." % path.get_file())
+		return
+	if f.get_length() > BlabberVoiceFile.MAX_BYTES:
+		_say("%s is too big to be a Blabbermouth file." % path.get_file())
+		return
+	open_line_bytes(f.get_buffer(f.get_length()), path.get_file())
+
+
+## Opens a .blab file: a line goes into the editor with its speaker added to
+## the characters; a voice file goes to the Voices page.
+func open_line_bytes(bytes: PackedByteArray, file_name: String) -> void:
+	if not BlabberLineFile.is_line(bytes):
+		show_page("voices")
+		library.import_bytes(bytes, file_name)
+		return
+	var r := BlabberLineFile.from_bytes(bytes)
+	if not r.ok:
+		_say("%s: %s" % [file_name, r.error])
+		return
+	var line: BlabberLine = r.line
+	if line.speaker and line.speaker.voice:
+		var m := Cast.Member.new()
+		m.speaker = line.speaker
+		m.speaker.display_name = Cast.unique_name(members, line.speaker_name)
+		if m.speaker.bubble == null:
+			m.speaker.bubble = BlabberBubbleStyle.new()
+		var b := m.speaker.bubble
+		if b.font:
+			var key := Cast.font_by_name(b.font.get_font_name())
+			if key != "":
+				var keep := b.font_size
+				Cast.set_font(b, key)
+				b.font_size = keep
+		m.kind = "man"
+		m.recording = m.speaker.voice.sample_bank
+		m.set_use_recording(m.recording != null)
+		members.append(m)
+		current = members.size() - 1
+		line_page.set_member(m)
+	line_page.load_source(line.text)
+	show_page("line")
+	save_soon()
+	_say("Opened %s%s." % [file_name, (" — %s joined the characters" % member().speaker.display_name) if line.speaker else ""])
+
+
+func _on_files_dropped(files: PackedStringArray) -> void:
+	var path := files[0]
+	var ext := path.get_extension().to_lower()
+	if ext == BlabberVoiceFile.EXTENSION:
+		_open_path(path)
+	elif ext in BlabberAudioImport.EXTENSIONS:
+		_open_recorder()
+		studio.load_path(path)
+
+
+## Web: one file input over Open and one over the Voices page's Import.
+## Either way the result is a .blab file; its contents say which kind.
+func _process(_delta: float) -> void:
+	BlabberWeb.place_file_input(open_button, open_button.is_visible_in_tree() and not record_sheet.visible and not export_sheet.visible and not menu.visible, Rect2(), "data")
+	if BlabberWeb.file_kind() != "data":
+		return
+	match BlabberWeb.state():
+		"reading":
+			_say("Reading %s…" % BlabberWeb.file_name())
+		"done":
+			var n := BlabberWeb.file_name()
+			open_line_bytes(BlabberWeb.take_bytes(), n)
+		"error":
+			_say(BlabberWeb.error())
+			BlabberWeb.reset()
+
+
+# --- Saving -------------------------------------------------------------------------
+
+func save_soon() -> void:
+	if _save_timer:
+		_save_timer.start()
+
+
+func save_now() -> void:
+	_save_timer.stop()
+	var err := Cast.save_state(members, current, line_page.model.to_source(), save_path)
+	if err != OK:
+		_say("Couldn't save your work on this device (%s)." % error_string(err))
+
+
+func _say(text: String) -> void:
+	status.text = text
+	status.visible = text != ""
+	_status_timer.start()
+
+
+func _ask(question: String, ok_text: String, then: Callable) -> void:
+	confirm.dialog_text = question
+	confirm.ok_button_text = ok_text
+	for c in confirm.confirmed.get_connections():
+		confirm.confirmed.disconnect(c.callable)
+	confirm.confirmed.connect(then, CONNECT_ONE_SHOT)
+	confirm.popup_centered()

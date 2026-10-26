@@ -9,6 +9,9 @@ signal opened(voice: BlabberVoice, voice_name: String)
 var get_voice: Callable
 ## Returns the current voice's name, used as the default name when saving.
 var get_name_hint: Callable
+## Off: the app reads web file picks and dropped files and passes voice
+## files to import_bytes().
+var handle_files := true
 
 var name_edit: LineEdit
 var list: ItemList
@@ -84,7 +87,7 @@ func _ready() -> void:
 	add_child(confirm)
 
 	get_window().files_dropped.connect(func(files: PackedStringArray) -> void:
-		if files[0].get_extension().to_lower() == BlabberVoiceFile.EXTENSION:
+		if handle_files and files[0].get_extension().to_lower() == BlabberVoiceFile.EXTENSION:
 			_import_path(files[0]))
 	# On the web, _process keeps the Import file input lined up with its button.
 	set_process(BlabberWeb.available())
@@ -97,7 +100,7 @@ func _process(_delta: float) -> void:
 	if p is Control:
 		clip = (p as Control).get_global_rect()
 	BlabberWeb.place_file_input(import_button, import_button.is_visible_in_tree(), clip, "data")
-	if BlabberWeb.file_kind() != "data":
+	if not handle_files or BlabberWeb.file_kind() != "data":
 		return # An audio file for the "My voice" panel.
 	match BlabberWeb.state():
 		"reading":
@@ -289,6 +292,10 @@ func _import_path(path: String) -> void:
 
 
 ## Adds an imported voice to the library and opens it.
+func import_bytes(bytes: PackedByteArray, file_name: String) -> void:
+	_import_bytes(bytes, file_name)
+
+
 func _import_bytes(bytes: PackedByteArray, file_name: String) -> void:
 	var r := BlabberVoiceFile.from_bytes(bytes, file_name.get_basename())
 	if not r.ok:

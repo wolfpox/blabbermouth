@@ -25,6 +25,12 @@ const CHARACTERS := [
 	["Giant", 0.45, 0.68],
 ]
 
+## Off: hide the Character and "Speak with my voice" options (the editor
+## fits the recording to the character itself).
+var show_voice_options := true
+## Off: the app handles dropped files itself.
+var handle_drops := true
+
 var bank: BlabberSampleBank
 var use_bank := false
 var pitch_mul := 1.0
@@ -122,6 +128,7 @@ func _ready() -> void:
 		changed.emit())
 	crow.add_child(copt)
 	add_child(crow)
+	crow.visible = show_voice_options
 	melody_slider = _slider("Follow melody", 0.0, 1.0, 0.01, melody, func(v: float) -> void:
 		melody = v
 		changed.emit())
@@ -136,6 +143,7 @@ func _ready() -> void:
 		use_bank = on
 		changed.emit())
 	add_child(use_check)
+	use_check.visible = show_voice_options
 	info = _label("", 13, 0.6)
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(info)
@@ -147,7 +155,7 @@ func _ready() -> void:
 	recorder.stopped.connect(_finish_recording)
 	get_window().files_dropped.connect(func(files: PackedStringArray) -> void:
 		# Voice files go to the library panel instead.
-		if files[0].get_extension().to_lower() != BlabberVoiceFile.EXTENSION:
+		if handle_drops and files[0].get_extension().to_lower() != BlabberVoiceFile.EXTENSION:
 			load_path(files[0]))
 	# On the web, _process also keeps the file input lined up with its button.
 	set_process(BlabberWeb.available())
@@ -334,6 +342,32 @@ func show_voice(voice: BlabberVoice) -> void:
 		if is_equal_approx(CHARACTERS[i][1], snappedf(pitch_mul, 0.01)) and is_equal_approx(CHARACTERS[i][2], size_scale):
 			character_opt.select(i)
 	_show_bank()
+
+
+## Starts fresh for another character: shows their recording, or nothing.
+func reset_for(voice: BlabberVoice, recording: BlabberSampleBank) -> void:
+	if recorder.recording:
+		recorder.stop()
+	audition.stop()
+	if recording and recording.slice_count() > 0:
+		bank = recording
+		use_bank = true
+		use_check.disabled = false
+		use_check.set_pressed_no_signal(true)
+		melody = voice.sample_melody
+		variety = voice.sample_variety
+		melody_slider.set_value_no_signal(melody)
+		variety_slider.set_value_no_signal(variety)
+		sensitivity_slider.set_value_no_signal(bank.sensitivity)
+		_show_bank()
+	else:
+		bank = null
+		use_bank = false
+		use_check.disabled = true
+		use_check.set_pressed_no_signal(false)
+		wave.clear()
+		var problem := BlabberRecorder.problem()
+		info.text = problem
 
 
 ## Copies this panel's settings onto a voice.
