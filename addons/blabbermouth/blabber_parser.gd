@@ -31,6 +31,8 @@ const PUNCT_PAUSE := {",": 0.16, ";": 0.22, ":": 0.22, ".": 0.34, "!": 0.32, "?"
 const SENTENCE_ENDS := ".!?…\n"
 const DIGIT_WORDS := ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
 const NON_WORD_CHARS := "…—–“”‘«»¿¡、。，！？・「」『』"
+## Segment keys for a recorded word (see _emit_recorded).
+const RECORDED_KEYS := ["clip", "cd", "pb", "rp0", "rp1", "ra0", "ra1", "fit", "take", "rec"]
 
 const VOWEL_DIGRAPHS := {
 	"ee": ["i"], "ea": ["i"], "ie": ["i"], "oo": ["u"], "ue": ["u"], "ew": ["u"],
@@ -217,15 +219,18 @@ static func _close_bb(stack: Array, key: String) -> String:
 
 ## Returns {segments, display_text, plain_text, visible}. "visible" is the number of
 ## visible characters, matching Label/RichTextLabel.visible_characters.
-static func build(text: String, voice: BlabberVoice) -> Dictionary:
+## Words in the voice's vocabulary are spoken with one of their recordings;
+## take picks which one (for previews), -1 lets each word choose.
+static func build(text: String, voice: BlabberVoice, take := -1) -> Dictionary:
 	var scan := _scan(text)
 	var sentences := _group(scan.items)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(text) ^ (voice.language_seed * 7919)
+	var ctx := _vocab_context(voice.vocabulary, text, take)
 	var segs: Array = []
 	_push(segs, _silence(0.01, 0, segs))
 	for s in sentences:
-		_build_sentence(s, voice, rng, segs)
+		_build_sentence(s, voice, rng, segs, ctx)
 	_push(segs, _silence(0.15, scan.visible, segs))
 	return {"segments": segs, "display_text": strip_tags(text), "plain_text": strip_all_tags(text),
 		"visible": scan.visible}
@@ -739,6 +744,8 @@ static func _silence(d: float, rev: int, segs: Array) -> Dictionary:
 	var s := prev.duplicate()
 	s.merge({"d": d, "v": 0.0, "asp": 0.0, "fr": 0.0, "m": 0.0, "rev": rev, "syl": false,
 		"word": "", "fast": false, "p0": prev.p1, "p1": prev.p1, "ph": ""}, true)
+	for k in RECORDED_KEYS:
+		s.erase(k)
 	return s
 
 
@@ -765,6 +772,14 @@ static func _combine(a: Dictionary, b: Dictionary) -> Dictionary:
 		else:
 			out[k] = out.get(k, 0.0) + b[k]
 	return out
+
+
+## The emotion, whisper or shout, and effects of a word, stacked.
+static func _mods(st: Dictionary) -> Dictionary:
+	var emo := _combine(BlabberVoice.emotion(st.emote), BlabberVoice.emotion(st.delivery))
+	for name in st.fx:
+		emo = _combine(emo, EFFECT_VOICE[name])
+	return emo
 
 
 ## How far through an effect a character is, 0 at its start to 1 at its end.
@@ -797,25 +812,31 @@ static func _fx_shape(st: Dictionary, char_pos: int, syl_n: int) -> Array:
 	return [semis, amp]
 
 
-static func _build_sentence(s: Dictionary, voice: BlabberVoice, rng: RandomNumberGenerator, segs: Array) -> void:
+static func _build_sentence(s: Dictionary, voice: BlabberVoice, rng: RandomNumberGenerator, segs: Array, ctx: Dictionary) -> void:
+	var tokens: Array = _merge_recorded(s.tokens, ctx)
 	var words: Array = []
-	for tok in s.tokens:
+	for tok in tokens:
 		if tok.t == "word":
 			words.append(tok)
 	var total_syl := 0
 	for wi in words.size():
 		var w: Dictionary = words[wi]
-		w.phones = _word_phones(w, voice, wi == 0)
-		w.nsyl = 0
-		for pd in w.phones:
-			if pd.syl:
-				w.nsyl += 1
+		if w.has("vocab"):
+			w.nsyl = 0
+			for part in String(w.text).split(" ", false):
+				w.nsyl += estimate_syllables(part.to_lower())
+			w.nsyl = clampi(w.nsyl, 1, 8)
+		else:
+			w.phones = _word_phones(w, voice, wi == 0)
+			w.nsyl = 0
+			for pd in w.phones:
+				if pd.syl:
+					w.nsyl += 1
 		total_syl += w.nsyl
 	var kind: String = s.end
 	var syl_k := 0
 	var word_n := 0
 	var last_speed := voice.speed
-	var tokens: Array = s.tokens
 	for ti in tokens.size():
 		var tok: Dictionary = tokens[ti]
 		match tok.t:
@@ -825,8 +846,12 @@ static func _build_sentence(s: Dictionary, voice: BlabberVoice, rng: RandomNumbe
 				_push(segs, _silence(PUNCT_PAUSE[tok.c] * voice.pause_scale / last_speed, tok.i + 1, segs))
 			"word":
 				var next_is_word: bool = ti + 1 < tokens.size() and tokens[ti + 1].t == "word"
-				last_speed = _emit_word(tok, voice, rng, segs, kind, syl_k, total_syl,
-					word_n == 0, word_n == words.size() - 1, next_is_word)
+				if tok.has("vocab"):
+					last_speed = _emit_recorded(tok, voice, rng, segs, kind, syl_k, total_syl,
+						word_n == 0, word_n == words.size() - 1, next_is_word, ctx)
+				else:
+					last_speed = _emit_word(tok, voice, rng, segs, kind, syl_k, total_syl,
+						word_n == 0, word_n == words.size() - 1, next_is_word)
 				syl_k += tok.nsyl
 				word_n += 1
 
@@ -835,9 +860,7 @@ static func _build_sentence(s: Dictionary, voice: BlabberVoice, rng: RandomNumbe
 static func _emit_word(w: Dictionary, voice: BlabberVoice, rng: RandomNumberGenerator, segs: Array,
 		kind: String, syl_k: int, total_syl: int, is_first: bool, is_last: bool, next_is_word: bool) -> float:
 	var st: Dictionary = w.st
-	var emo := _combine(BlabberVoice.emotion(st.emote), BlabberVoice.emotion(st.delivery))
-	for name in st.fx:
-		emo = _combine(emo, EFFECT_VOICE[name])
+	var emo := _mods(st)
 	var speed: float = maxf(voice.speed * st.speed * emo.get("speed", 1.0), 0.05)
 	var inton: float = voice.intonation * emo.get("intonation", 1.0)
 	var base: float = voice.pitch * st.pitch * emo.get("pitch", 1.0)
@@ -968,4 +991,169 @@ static func _emit_word(w: Dictionary, voice: BlabberVoice, rng: RandomNumberGene
 		segs[first_seg].word = text
 	if next_is_word and voice.word_gap > 0.0:
 		_push(segs, _silence(voice.word_gap / speed, w.idx[-1] + 1, segs))
+	return speed
+
+
+# --- Recorded words (BlabberVocabulary) ----------------------------------------
+
+static func _vocab_context(vocab: BlabberVocabulary, text: String, take: int) -> Dictionary:
+	var ctx := {"vocab": {}, "longest": 0, "fit": true, "take": take, "last": {}}
+	if vocab == null:
+		return ctx
+	ctx.vocab = vocab.lookup()
+	ctx.fit = vocab.fit_to_voice
+	for k in ctx.vocab:
+		ctx.longest = maxi(ctx.longest, k.count(" ") + 1)
+	# Its own random numbers, so the rest of the line sounds the same either way.
+	var take_rng := RandomNumberGenerator.new()
+	take_rng.seed = hash(text) + 7
+	ctx.rng = take_rng
+	return ctx
+
+
+## Joins runs of words that make up a vocabulary word or phrase (longest
+## first) into one token with the word's entry under "vocab".
+static func _merge_recorded(tokens: Array, ctx: Dictionary) -> Array:
+	if ctx.vocab.is_empty():
+		return tokens
+	var out: Array = []
+	var i := 0
+	while i < tokens.size():
+		var tok: Dictionary = tokens[i]
+		if tok.t != "word":
+			out.append(tok)
+			i += 1
+			continue
+		var run := 0
+		while run < ctx.longest and i + run < tokens.size() and tokens[i + run].t == "word":
+			run += 1
+		var merged = null
+		for n in range(run, 0, -1):
+			var keys: PackedStringArray = []
+			var texts: PackedStringArray = []
+			for k in n:
+				keys.append(BlabberVocabulary.key_of(tokens[i + k].text))
+				texts.append(tokens[i + k].text)
+			var key := " ".join(keys)
+			var entry = ctx.vocab.get(key)
+			if entry == null:
+				continue
+			var idx: Array = []
+			for k in n:
+				idx.append_array(tokens[i + k].idx)
+			merged = {"t": "word", "text": " ".join(texts), "idx": idx, "st": tok.st,
+				"st_end": tokens[i + n - 1].st, "vocab": entry, "key": key, "n": n}
+			break
+		if merged == null:
+			out.append(tok)
+			i += 1
+		else:
+			out.append(merged)
+			i += merged.n
+	return out
+
+
+## The words and phrases in a line that a vocabulary (or a voice's
+## vocabulary) says with a recording: [{key, word, start, end}, ...], where
+## word is the BlabberWord and start and end are visible character positions.
+static func recorded_words(text: String, vocab_or_voice: Resource) -> Array:
+	var vocab: BlabberVocabulary = vocab_or_voice.vocabulary if vocab_or_voice is BlabberVoice else vocab_or_voice
+	var out: Array = []
+	if vocab == null:
+		return out
+	var ctx := _vocab_context(vocab, text, -1)
+	if ctx.vocab.is_empty():
+		return out
+	for s in _group(_scan(text).items):
+		for tok in _merge_recorded(s.tokens, ctx):
+			if tok.has("vocab"):
+				out.append({"key": tok.key, "word": tok.vocab, "start": tok.idx[0], "end": tok.idx[-1] + 1})
+	return out
+
+
+## Adds a recorded word: silent segments (one per syllable, so the text and
+## the syllable signals keep going) whose first one carries the take and how
+## to play it. The engine mixes the take in. Returns the word's speed.
+static func _emit_recorded(w: Dictionary, voice: BlabberVoice, rng: RandomNumberGenerator, segs: Array,
+		kind: String, syl_k: int, total_syl: int, is_first: bool, is_last: bool, next_is_word: bool, ctx: Dictionary) -> float:
+	var st: Dictionary = w.st
+	var st_end: Dictionary = w.st_end
+	var emo := _mods(st)
+	var fit: bool = ctx.fit
+	var speed: float = maxf((voice.speed if fit else 1.0) * st.speed * emo.get("speed", 1.0), 0.05)
+	var inton: float = voice.intonation * emo.get("intonation", 1.0)
+	var base: float = voice.pitch * st.pitch * emo.get("pitch", 1.0)
+	var word_amp: float = st.volume * emo.get("volume", 1.0)
+	var dyn := _dyn(voice, emo)
+	var text: String = w.text
+	var is_caps := text.length() > 1 and text == text.to_upper() and text != text.to_lower()
+	var word_off := (rng.randf() * 2.0 - 1.0) * voice.pitch_variation
+	var nsyl: int = w.nsyl
+	var idx: Array = w.idx
+
+	# Which take: the one asked for, or any but the one this word used last.
+	var entry: BlabberWord = w.vocab
+	var n_takes := entry.takes.size()
+	var pick: int = ctx.take
+	if pick < 0 or pick >= n_takes:
+		var take_rng: RandomNumberGenerator = ctx.rng
+		pick = take_rng.randi() % n_takes
+		var last: int = ctx.last.get(w.key, -1)
+		if pick == last and n_takes > 1:
+			pick = (pick + 1 + take_rng.randi() % (n_takes - 1)) % n_takes
+	ctx.last[w.key] = pick
+	var clip: BlabberClip = entry.takes[pick]
+
+	# Melody at the start and end of the word, worked out like a syllable's.
+	var span := maxf(1.0, total_syl - 1.0)
+	var s0 := inton * (0.35 - 0.7 * syl_k / span) + word_off
+	var s1 := inton * (0.35 - 0.7 * (syl_k + nsyl - 1) / span) + word_off
+	var a0 := 1.0
+	var a1 := 1.0
+	if kind == "!":
+		s0 += inton * 0.3 + (inton * 0.4 if is_first else 0.0)
+		s1 += inton * 0.3
+		a0 *= 1.12
+		a1 *= 1.12
+	if is_caps:
+		s0 += inton * 0.5 + 1.0
+		s1 += inton * 0.5 + 1.0
+		a0 *= 1.3
+		a1 *= 1.3
+	if not st.fx.is_empty():
+		var shape := _fx_shape(st, idx[0], syl_k)
+		s0 += shape[0]
+		a0 *= shape[1]
+	if not st_end.fx.is_empty():
+		var shape := _fx_shape(st_end, idx[-1], syl_k + nsyl - 1)
+		s1 += shape[0]
+		a1 *= shape[1]
+	var p0 := base * _st(s0)
+	var p1 := base * _st(s1)
+	if is_last:
+		if kind == "?":
+			p1 *= _st(inton * 1.0 + 1.0)
+		elif kind != "":
+			p1 *= _st(-inton * 0.6)
+
+	var dur := clip.duration() / clampf(speed, 0.4, 2.5)
+	var levels := clip.levels(nsyl)
+	var n := idx.size()
+	var first_seg := segs.size()
+	for j in nsyl:
+		var rev: int = idx[clampi(ceili(float(j + 1) * n / nsyl) - 1, 0, n - 1)] + 1
+		var u0 := float(j) / nsyl
+		var u1 := float(j + 1) / nsyl
+		var amp := lerpf(a0, a1, u0) * word_amp
+		var sg := _seg(dur / nsyl, P.SCHWA, lerpf(p0, p1, u0), lerpf(p0, p1, u1), amp, rev, dyn)
+		sg.syl = true
+		sg.ph = "rec" # Not silence (word_timings looks for that).
+		sg.rec = levels[j] * amp # How loud this part is, for drawing.
+		_push(segs, sg)
+	var head: Dictionary = segs[first_seg]
+	head.word = text
+	head.merge({"clip": clip, "cd": dur, "pb": base, "rp0": p0, "rp1": p1, "ra0": a0 * word_amp, "ra1": a1 * word_amp,
+		"fit": fit, "take": pick}, true)
+	if next_is_word and voice.word_gap > 0.0:
+		_push(segs, _silence(voice.word_gap / speed, idx[-1] + 1, segs))
 	return speed

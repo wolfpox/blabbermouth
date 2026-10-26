@@ -36,6 +36,7 @@ func _init(p_segments: Array, p_voice: BlabberVoice, p_sample_rate: float = 2205
 	_scale = sample_rate / bank.sample_rate
 	_rank_slices()
 	_plan()
+	_start_words()
 
 
 ## Brightness rank 0..1 of each active slice among the others.
@@ -112,7 +113,7 @@ func _choose(sy: Dictionary, last_pick: int) -> int:
 	return pick
 
 
-func render(frames: int) -> PackedFloat32Array:
+func _render(frames: int) -> PackedFloat32Array:
 	var out := PackedFloat32Array()
 	out.resize(frames)
 	var until := _pos + frames
@@ -134,7 +135,7 @@ func render(frames: int) -> PackedFloat32Array:
 	return out
 
 
-func mouth_at(sample_pos: int) -> float:
+func _mouth_at(sample_pos: int) -> float:
 	var a := maxi(0, sample_pos - 128)
 	var b := mini(_out.size(), sample_pos + 128)
 	if b <= a:

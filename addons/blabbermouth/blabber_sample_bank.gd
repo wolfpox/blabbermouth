@@ -13,6 +13,8 @@ const FRAME := 220 ## Analysis frame, 10 ms.
 const MIN_FRAMES := 6 ## Shortest syllable, 60 ms.
 const MAX_FRAMES := 45 ## Longest syllable, 450 ms.
 const MAX_SECONDS := 30.0
+## Samples frame_pitch() looks at (about 41 ms).
+const PITCH_SPAN := (256 + 200) * 2
 
 @export var audio := PackedFloat32Array()
 @export var sample_rate := RATE
@@ -354,12 +356,7 @@ class _Band:
 
 ## Pitch from autocorrelation on a few frames near the middle (McLeod-style).
 func _detect_pitch(a: int, b: int) -> float:
-	# Work at half rate for speed.
-	var sr := RATE / 2.0
-	var lag_min := int(sr / 1000.0)
-	var lag_max := int(sr / 55.0)
-	var win := 256
-	var need := (win + lag_max) * 2
+	var need := PITCH_SPAN
 	var found: Array = []
 	var frames := 0
 	for pos in [0.3, 0.5, 0.7]:
@@ -368,35 +365,50 @@ func _detect_pitch(a: int, b: int) -> float:
 		if s0 < a - need / 4 or s0 + need > audio.size() or s0 < 0:
 			continue
 		frames += 1
-		var x := PackedFloat32Array()
-		x.resize(win + lag_max)
-		for i in x.size():
-			x[i] = (audio[s0 + i * 2] + audio[s0 + i * 2 + 1]) * 0.5
-		var nsdf := PackedFloat32Array()
-		nsdf.resize(lag_max + 1)
-		var top := 0.0
-		for lag in range(lag_min, lag_max + 1):
-			var r := 0.0
-			var m := 0.0
-			for i in win:
-				var p := x[i]
-				var q := x[i + lag]
-				r += p * q
-				m += p * p + q * q
-			var v := 2.0 * r / maxf(m, 1e-9)
-			nsdf[lag] = v
-			top = maxf(top, v)
-		if top < 0.6:
-			continue
-		# First strong peak avoids octave errors.
-		for lag in range(lag_min + 1, lag_max):
-			var v := nsdf[lag]
-			if v >= top * 0.88 and v >= nsdf[lag - 1] and v >= nsdf[lag + 1]:
-				var den := nsdf[lag - 1] - 2.0 * v + nsdf[lag + 1]
-				var shift := 0.0 if absf(den) < 1e-9 else 0.5 * (nsdf[lag - 1] - nsdf[lag + 1]) / den
-				found.append(sr / (lag + clampf(shift, -0.5, 0.5)))
-				break
+		var f := frame_pitch(audio, s0)
+		if f > 0.0:
+			found.append(f)
 	if found.is_empty() or found.size() * 2 < frames:
 		return 0.0
 	found.sort()
 	return found[found.size() / 2]
+
+
+## Pitch in Hz of the PITCH_SPAN samples of 22050 Hz audio starting at s0
+## (McLeod-style autocorrelation), or 0 if there's no clear pitch.
+static func frame_pitch(x_in: PackedFloat32Array, s0: int) -> float:
+	# Work at half rate for speed.
+	var sr := RATE / 2.0
+	var lag_min := int(sr / 1000.0)
+	var lag_max := int(sr / 55.0)
+	var win := 256
+	if s0 < 0 or s0 + (win + lag_max) * 2 > x_in.size():
+		return 0.0
+	var x := PackedFloat32Array()
+	x.resize(win + lag_max)
+	for i in x.size():
+		x[i] = (x_in[s0 + i * 2] + x_in[s0 + i * 2 + 1]) * 0.5
+	var nsdf := PackedFloat32Array()
+	nsdf.resize(lag_max + 1)
+	var top := 0.0
+	for lag in range(lag_min, lag_max + 1):
+		var r := 0.0
+		var m := 0.0
+		for i in win:
+			var p := x[i]
+			var q := x[i + lag]
+			r += p * q
+			m += p * p + q * q
+		var v := 2.0 * r / maxf(m, 1e-9)
+		nsdf[lag] = v
+		top = maxf(top, v)
+	if top < 0.6:
+		return 0.0
+	# First strong peak avoids octave errors.
+	for lag in range(lag_min + 1, lag_max):
+		var v := nsdf[lag]
+		if v >= top * 0.88 and v >= nsdf[lag - 1] and v >= nsdf[lag + 1]:
+			var den := nsdf[lag - 1] - 2.0 * v + nsdf[lag + 1]
+			var shift := 0.0 if absf(den) < 1e-9 else 0.5 * (nsdf[lag - 1] - nsdf[lag + 1]) / den
+			return sr / (lag + clampf(shift, -0.5, 0.5))
+	return 0.0

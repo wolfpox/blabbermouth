@@ -113,10 +113,10 @@ func _init(p_segments: Array, p_voice: BlabberVoice, p_sample_rate: float = 2205
 		_f1 = first_voiced.f[0]; _f2 = first_voiced.f[1]; _f3 = first_voiced.f[2]; _f4 = first_voiced.f[3]
 		_te = first_voiced.te; _br = first_voiced.br; _ro = first_voiced.ro; _gr = first_voiced.gr
 		_ji = first_voiced.ji; _vd = first_voiced.vd; _vr = first_voiced.vr; _vo = first_voiced.vo
+	_start_words(BLOCK)
 
 
-## Renders the next `frames` mono samples. After the end it returns silence.
-func render(frames: int) -> PackedFloat32Array:
+func _render(frames: int) -> PackedFloat32Array:
 	var out := PackedFloat32Array()
 	out.resize(frames)
 	var i := 0
@@ -132,7 +132,7 @@ func render(frames: int) -> PackedFloat32Array:
 	return out
 
 
-func mouth_at(sample_pos: int) -> float:
+func _mouth_at(sample_pos: int) -> float:
 	var i := sample_pos / BLOCK
 	if i < 0 or i >= mouth_track.size():
 		return 0.0

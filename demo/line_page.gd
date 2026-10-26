@@ -419,21 +419,26 @@ func _refresh() -> void:
 	rec_button.set_pressed_no_signal(member.use_recording)
 	var v := member.speaker.voice
 	var who := member.speaker.display_name
+	var src: String = model.to_source()
+	var recorded := BlabberParser.recorded_words(src, v)
 	if member.use_recording and rec:
 		source_detail.text = "Your recording · %.1f s, played at %d Hz to fit %s" % [rec.audio.size() / float(rec.sample_rate), roundi(v.pitch), who]
 	else:
 		source_detail.text = "%s’s synth voice · %d Hz · %s" % [who, roundi(v.pitch), "says real words" if v.mode == BlabberVoice.Mode.PHONETIC else "speaks gibberish"]
+	if not recorded.is_empty():
+		source_detail.text += " · %d recorded word%s" % [recorded.size(), "" if recorded.size() == 1 else "s"]
 	record_again.visible = member.use_recording
 	record_again.text = "Record again"
 	# What the voice does
-	var src: String = model.to_source()
 	tags_view.text = src
 	for c in marks_box.get_children():
 		c.queue_free()
 	var marks: Array = model.marks()
 	for m in marks:
 		marks_box.add_child(_mark_row(m))
-	marks_empty.visible = marks.is_empty()
+	for word in recorded:
+		marks_box.add_child(_recorded_row(word))
+	marks_empty.visible = marks.is_empty() and recorded.is_empty()
 	_bars_timer.start()
 	edited.emit()
 
@@ -483,6 +488,38 @@ func _mark_row(m: Dictionary) -> Control:
 	return row
 
 
+## A word the vocabulary says with a recording.
+func _recorded_row(r: Dictionary) -> Control:
+	var on: bool = sel == Vector2i(r.start, r.end)
+	var row := Clickable.new(Ui.box(Ui.CLEAR, 14, Ui.LINE_SOFT, 1, 14, 8), Ui.box(Ui.RAISED, 14, Ui.LINE, 1, 14, 8), Ui.box(Color("2c2f39"), 14, Ui.ACCENT, 1, 14, 8))
+	row.on = on
+	row.custom_minimum_size.y = 52
+	var flow := HFlowContainer.new()
+	flow.add_theme_constant_override("h_separation", 14)
+	flow.add_theme_constant_override("v_separation", 4)
+	flow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(flow)
+	var t := Ui.label("“%s”" % _short(model.text.substr(r.start, r.end - r.start), 34), 15, Ui.TEXT, true)
+	t.autowrap_mode = TextServer.AUTOWRAP_OFF
+	t.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	flow.add_child(t)
+	var chip := _tag_chip("Recorded")
+	chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	flow.add_child(chip)
+	var w: BlabberWord = r.word
+	var n := w.takes.size()
+	var fit := member.speaker.voice.vocabulary.fit_to_voice
+	var d := Ui.label("%s · %s" % ["one take" if n == 1 else "one of %d takes" % n,
+		"at %s’s pitch and size" % member.speaker.display_name if fit else "as recorded"], 14, Ui.DIM)
+	d.autowrap_mode = TextServer.AUTOWRAP_OFF
+	d.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	d.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	flow.add_child(d)
+	row.pressed.connect(func() -> void: select_range(Vector2i(r.start, r.end)))
+	return row
+
+
 func _tag_chip(text: String) -> Control:
 	var p := PanelContainer.new()
 	p.add_theme_stylebox_override("panel", Ui.box(Ui.LINE_SOFT, 8, Ui.CLEAR, 0, 9, 3))
@@ -510,7 +547,8 @@ func _update_bars() -> void:
 	var t := 0.0
 	var top := 0.0001
 	for s in segs:
-		var e: float = s.a * (s.v + 0.35 * (s.asp + s.fr))
+		# Recorded words are silent in the plan; they say how loud they are.
+		var e: float = s.get("rec", s.a * (s.v + 0.35 * (s.asp + s.fr)))
 		var i0 := clampi(int(t / _total * n), 0, n - 1)
 		var i1 := clampi(int((t + s.d) / _total * n), 0, n - 1)
 		var ci: int = s.rev - 1

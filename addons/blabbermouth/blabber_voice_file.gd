@@ -5,7 +5,8 @@ extends RefCounted
 ## (A .blab file can also hold a whole line of dialogue: see BlabberLineFile.)
 ##
 ## A .blab file is plain JSON text: the voice settings, plus the recording
-## (as 16-bit audio in base64) when the voice has one. Unlike .tres and .res
+## (as 16-bit audio in base64) when the voice has one, and its vocabulary
+## (recorded words) when it has one. Unlike .tres and .res
 ## files it can't contain code, so it is safe to open files other people made.
 ## [codeblock]
 ## BlabberVoiceFile.write(voice, "user://goblin.blab", "Grumpy goblin")
@@ -65,6 +66,8 @@ static func from_bytes(bytes: PackedByteArray, fallback_name := "") -> Dictionar
 	if not parsed.ok:
 		return _fail(parsed.error)
 	var data: Dictionary = parsed.data
+	if data.has("blabbermouth_vocabulary"):
+		return _fail("This is a vocabulary file, not a voice.")
 	if data.has("blabbermouth_line"):
 		var line_version = data.blabbermouth_line
 		if not _is_num(line_version) or typeof(data.get("speaker")) != TYPE_DICTIONARY:
@@ -89,13 +92,20 @@ static func from_bytes(bytes: PackedByteArray, fallback_name := "") -> Dictionar
 	return {"ok": true, "voice": voice, "name": voice_name, "error": ""}
 
 
-## A voice as plain values: {"voice": settings, "samples": recording}.
-## "samples" is left out when the voice has no recording.
-static func voice_to_dict(voice: BlabberVoice) -> Dictionary:
+## A voice as plain values: {"voice": settings, "samples": recording,
+## "vocabulary": recorded words}. "samples" and "vocabulary" are left out
+## when the voice has none. With only_words_in (a line's text), the
+## vocabulary keeps just the words that line uses.
+static func voice_to_dict(voice: BlabberVoice, only_words_in = null) -> Dictionary:
 	var d := {"voice": settings_of(voice)}
 	var bank := voice.sample_bank
 	if bank != null and bank.slice_count() > 0:
 		d["samples"] = _bank_to_dict(bank)
+	var vocab := voice.vocabulary
+	if vocab != null and only_words_in is String:
+		vocab = vocab.only_used_in(only_words_in)
+	if vocab != null and not vocab.lookup().is_empty():
+		d["vocabulary"] = vocab.to_dict()
 	return d
 
 
@@ -110,15 +120,22 @@ static func voice_from_dict(d: Dictionary) -> Dictionary:
 		if bank == null:
 			return _fail("The recording in this file is damaged.")
 		voice.sample_bank = bank
+	if d.has("vocabulary"):
+		var r := BlabberVocabulary.from_dict(d.vocabulary)
+		if not r.ok:
+			return _fail(r.error)
+		voice.vocabulary = r.vocabulary
 	return {"ok": true, "voice": voice, "name": "", "error": ""}
 
 
-## A separate copy of a voice, recording included.
+## A separate copy of a voice, recording included. The vocabulary is
+## shared, since several voices often use the same one.
 static func copy_voice(voice: BlabberVoice) -> BlabberVoice:
 	var v := BlabberVoice.new()
 	apply_settings(v, settings_of(voice))
 	if voice.sample_bank:
 		v.sample_bank = voice.sample_bank.duplicate()
+	v.vocabulary = voice.vocabulary
 	v.resource_name = voice.resource_name
 	return v
 

@@ -47,6 +47,7 @@ var shadow_buttons: Array = []
 var sliders := {}
 var values := {}
 var words_check: CheckButton
+var vocab_check: CheckButton
 var tail_check: CheckButton
 var _syncing := false
 
@@ -183,6 +184,15 @@ func _ready() -> void:
 		member.speaker.voice.mode = BlabberVoice.Mode.PHONETIC if on else BlabberVoice.Mode.GIBBERISH
 		changed.emit("voice"))
 	voice.add_child(words_check)
+	vocab_check = CheckButton.new()
+	vocab_check.text = "Says vocabulary words with their recordings"
+	vocab_check.tooltip_text = "Words on the Vocabulary page are spoken with your recordings, in this character's pitch and size."
+	vocab_check.toggled.connect(func(on: bool) -> void:
+		if _syncing:
+			return
+		member.set_use_vocabulary(on)
+		changed.emit("voice"))
+	voice.add_child(vocab_check)
 	if full:
 		for spec in MORE_SLIDERS:
 			voice.add_child(_slider_row(spec[0], spec, _voice_value))
@@ -248,6 +258,7 @@ func _sync() -> void:
 		sliders[prop].set_value_no_signal(val)
 		values[prop].text = _fmt(prop, val)
 	words_check.set_pressed_no_signal(v.mode == BlabberVoice.Mode.PHONETIC)
+	vocab_check.set_pressed_no_signal(member.use_vocabulary)
 	_syncing = false
 
 

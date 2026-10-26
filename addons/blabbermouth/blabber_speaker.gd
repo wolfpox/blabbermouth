@@ -30,11 +30,12 @@ func copy() -> BlabberSpeaker:
 	return s
 
 
-## Plain values for a line file.
-func to_dict(embed_font := true) -> Dictionary:
+## Plain values for a line file. With only_words_in (the line's text), the
+## voice's vocabulary keeps just the words that line uses.
+func to_dict(embed_font := true, only_words_in = null) -> Dictionary:
 	var d := {"name": BlabberVoiceFile.clean_name(display_name)}
 	if voice:
-		d.merge(BlabberVoiceFile.voice_to_dict(voice))
+		d.merge(BlabberVoiceFile.voice_to_dict(voice, only_words_in))
 	if bubble:
 		d["bubble"] = bubble.to_dict(embed_font)
 	return d

@@ -5,7 +5,8 @@ extends RefCounted
 ##
 ## Like a voice file, it is plain JSON and can't contain code. It holds the
 ## text with its tags and a full copy of the speaker: name, voice (with the
-## recording, if any) and bubble style (with the font, if embedded). Opening
+## recording, if any, and the recorded words the line uses) and bubble
+## style (with the font, if embedded). Opening
 ## a line file with BlabberVoiceFile.read() gives the speaker's voice.
 ## [codeblock]
 ## BlabberLineFile.write(line, "user://hello_traveler.blab")
@@ -50,7 +51,7 @@ static func read(path: String, load_font := true) -> Dictionary:
 static func to_bytes(line: BlabberLine, embed_font := true) -> PackedByteArray:
 	var data := {"blabbermouth_line": FORMAT, "text": line.text.left(MAX_TEXT)}
 	if line.speaker:
-		data["speaker"] = line.speaker.to_dict(embed_font)
+		data["speaker"] = line.speaker.to_dict(embed_font, line.text.left(MAX_TEXT))
 	return JSON.stringify(data, "\t").to_utf8_buffer()
 
 
@@ -64,6 +65,8 @@ static func from_bytes(bytes: PackedByteArray, load_font := true) -> Dictionary:
 	if typeof(version) != TYPE_FLOAT and typeof(version) != TYPE_INT:
 		if data.has("blabbermouth_voice"):
 			return _fail("This is a voice file, not a line.")
+		if data.has("blabbermouth_vocabulary"):
+			return _fail("This is a vocabulary file, not a line.")
 		return _fail("This isn't a Blabbermouth line file.")
 	if int(version) > FORMAT:
 		return _fail("This line was made with a newer version of Blabbermouth.")

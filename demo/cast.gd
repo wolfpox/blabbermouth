@@ -1,7 +1,8 @@
 extends RefCounted
 ## The demo's characters. Each is a BlabberSpeaker (name, voice, bubble) plus
-## what the editor needs around it: the voice preset it started from and a
-## recording that's kept even while the synth voice is in use.
+## what the editor needs around it: the voice preset it started from, a
+## recording that's kept even while the synth voice is in use, and whether
+## it uses the shared vocabulary (recorded words).
 
 const SAVE_PATH := "user://editor.json"
 const FORMAT := 1
@@ -60,11 +61,20 @@ class Member extends RefCounted:
 	## The user's recording for this character, kept while the synth voice is used.
 	var recording: BlabberSampleBank
 	var use_recording := false
+	## The cast's shared vocabulary.
+	var vocabulary: BlabberVocabulary
+	## Say vocabulary words with their recordings.
+	var use_vocabulary := true
 
 	## Speak with the recording (if there is one) or the synth voice.
 	func set_use_recording(on: bool) -> void:
 		use_recording = on and recording != null
 		speaker.voice.sample_bank = recording if use_recording else null
+		speaker.voice.vocabulary = vocabulary if use_vocabulary else null
+
+	func set_use_vocabulary(on: bool) -> void:
+		use_vocabulary = on
+		speaker.voice.vocabulary = vocabulary if use_vocabulary else null
 
 	## Which of the demo's fonts the bubble uses, or "" for another font.
 	func font_key() -> String:
@@ -126,8 +136,62 @@ static func copy_member(m: Member, new_name: String) -> Member:
 	c.speaker = m.speaker.copy()
 	c.speaker.display_name = new_name
 	c.recording = m.recording
+	c.vocabulary = m.vocabulary
+	c.use_vocabulary = m.use_vocabulary
 	c.set_use_recording(m.use_recording)
 	return c
+
+
+## Gives every character the shared vocabulary (each keeps its own on/off).
+static func attach_vocabulary(members: Array, vocab: BlabberVocabulary) -> void:
+	for m in members:
+		m.vocabulary = vocab
+		m.set_use_vocabulary(m.use_vocabulary)
+
+
+## Where the vocabulary is kept, next to the editor's save file.
+static func vocabulary_path(save_path := SAVE_PATH) -> String:
+	return save_path.get_basename() + "_vocabulary.blab"
+
+
+## The saved vocabulary, or a new empty one.
+static func load_vocabulary(path: String) -> BlabberVocabulary:
+	if FileAccess.file_exists(path):
+		var r := BlabberVocabulary.read(path)
+		if r.ok:
+			return r.vocabulary
+	return BlabberVocabulary.new()
+
+
+## Adds the words of another vocabulary (from a file) that aren't there yet,
+## and takes for words that are, without repeating a take. Returns how many
+## words (x) and takes (y) were added.
+static func merge_vocabulary(into: BlabberVocabulary, from: BlabberVocabulary) -> Vector2i:
+	var added := Vector2i.ZERO
+	for w in from.words:
+		var have := into.find(w.text)
+		if have == null:
+			if into.add_word(w.text) == null:
+				continue
+			have = into.find(w.text)
+			added.x += 1
+		for t in w.takes:
+			var dup := false
+			for h in have.takes:
+				dup = dup or _same_audio(h.audio, t.audio)
+			if not dup and into.add_clip(w.text, t):
+				added.y += 1
+	return added
+
+
+## The same recording, give or take what saving it as 16-bit audio changes.
+static func _same_audio(a: PackedFloat32Array, b: PackedFloat32Array) -> bool:
+	if a.size() != b.size():
+		return false
+	for i in a.size():
+		if absf(a[i] - b[i]) > 0.0002:
+			return false
+	return true
 
 
 static func set_font(b: BlabberBubbleStyle, key: String) -> void:
@@ -169,11 +233,16 @@ static func save_state(members: Array, current: int, line_source: String, path :
 		var key: String = m.font_key()
 		# Save the recording even while it isn't in use.
 		var voice: BlabberVoice = m.speaker.voice
+		# The vocabulary is shared, so it's saved once, on its own.
 		var in_use := voice.sample_bank
+		var vocab := voice.vocabulary
 		voice.sample_bank = m.recording
+		voice.vocabulary = null
 		var d: Dictionary = m.speaker.to_dict(key == "")
 		voice.sample_bank = in_use
-		list.append({"kind": m.kind, "font": key, "use_recording": m.use_recording, "speaker": d})
+		voice.vocabulary = vocab
+		list.append({"kind": m.kind, "font": key, "use_recording": m.use_recording,
+			"use_vocabulary": m.use_vocabulary, "speaker": d})
 	var data := {"blabbermouth_editor": FORMAT, "current": current, "line": line_source, "members": list}
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
@@ -213,6 +282,7 @@ static func load_state(path := SAVE_PATH) -> Dictionary:
 		var kind := str(e.get("kind", "man"))
 		m.kind = kind if kind in BlabberVoice.PRESET_NAMES else "man"
 		m.recording = m.speaker.voice.sample_bank
+		m.use_vocabulary = e.get("use_vocabulary", true) != false
 		m.set_use_recording(e.get("use_recording") == true)
 		members.append(m)
 	if members.is_empty():
