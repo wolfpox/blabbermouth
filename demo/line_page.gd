@@ -362,6 +362,7 @@ func _reads_card() -> Control:
 	p.add_child(v)
 	var top := Ui.hbox(12)
 	var h := Ui.heading("How the voice reads it")
+	h.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	h.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(h)
 	tags_button = Ui.button("Show tags", _toggle_tags)

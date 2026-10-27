@@ -201,13 +201,14 @@ static func make_theme() -> Theme:
 	t.set_icon("grabber_highlight", "HSlider", _dot(Color.WHITE, 10))
 	t.set_icon("grabber_disabled", "HSlider", _dot(FAINT, 9))
 
-	var bar := box(CLEAR, 4, CLEAR, 0, 3, 3)
+	# Scrollbars: a soft track with a thumb that's easy to see.
+	var bar := box(Color(1, 1, 1, 0.04), 5, CLEAR, 0, 4, 4)
 	for type in ["VScrollBar", "HScrollBar"]:
 		t.set_stylebox("scroll", type, bar)
 		t.set_stylebox("scroll_focus", type, bar)
-		t.set_stylebox("grabber", type, box(LINE, 4, CLEAR, 0, 3, 3))
-		t.set_stylebox("grabber_highlight", type, box(Color("4a4f5c"), 4, CLEAR, 0, 3, 3))
-		t.set_stylebox("grabber_pressed", type, box(Color("4a4f5c"), 4, CLEAR, 0, 3, 3))
+		t.set_stylebox("grabber", type, box(Color("5d6372"), 5, CLEAR, 0, 4, 4))
+		t.set_stylebox("grabber_highlight", type, box(Color("7a8194"), 5, CLEAR, 0, 4, 4))
+		t.set_stylebox("grabber_pressed", type, box(ACCENT, 5, CLEAR, 0, 4, 4))
 
 	t.set_stylebox("panel", "PanelContainer", box(PANEL, 24, CLEAR, 0, 20, 20))
 	t.set_stylebox("separator", "HSeparator", box(LINE_SOFT, 0, CLEAR, 0, 0, 0))

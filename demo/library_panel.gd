@@ -73,6 +73,7 @@ func _ready() -> void:
 	add_child(arow)
 	copy_words_check = CheckButton.new()
 	copy_words_check.text = "Exports carry copies of the recorded words"
+	copy_words_check.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	copy_words_check.button_pressed = true
 	copy_words_check.tooltip_text = "On: an exported voice file has everything it needs.\nOff: it links to its sets of recorded words by name, so voices that share a set can share one file. Export the sets from the Vocabulary page and keep them in the same folder."
 	add_child(copy_words_check)

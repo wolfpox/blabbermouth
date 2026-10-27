@@ -11,6 +11,7 @@ const CastPage := preload("res://demo/cast_page.gd")
 const VocabularyPage := preload("res://demo/vocabulary_page.gd")
 const LibraryPanel := preload("res://demo/library_panel.gd")
 const SampleStudio := preload("res://demo/sample_studio.gd")
+const TouchScroll := preload("res://demo/touch_scroll.gd")
 
 ## Where the editor keeps its characters and line. Tests point it elsewhere.
 var save_path := Cast.SAVE_PATH
@@ -28,6 +29,9 @@ var tabs := {}
 var open_button: Button
 var export_button: Button
 var scroll: ScrollContainer
+## Screen pixels per canvas unit, before shrinking to fit.
+var _scale := 1.0
+var _fitting := false
 var pages: VBoxContainer
 var line_page: LinePage
 var cast_page: CastPage
@@ -132,6 +136,9 @@ func _ready() -> void:
 	lib_panel.add_child(library)
 
 	_build_menu()
+	var touch := TouchScroll.new()
+	touch.host = self
+	add_child(touch)
 	_build_recorder()
 	_build_export()
 	confirm = ConfirmationDialog.new()
@@ -172,6 +179,7 @@ func _ready() -> void:
 		save_soon()
 	show_page("line")
 	get_window().size_changed.connect(_layout)
+	margin.minimum_size_changed.connect(_fit_soon)
 	get_window().files_dropped.connect(_on_files_dropped)
 	_layout.call_deferred()
 	set_process(BlabberWeb.available())
@@ -259,7 +267,7 @@ func _layout() -> void:
 	win.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
 	win.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
 	var win_size := test_size if test_size != Vector2i.ZERO else win.size
-	win.content_scale_size = Vector2i(Vector2(win_size) / scale)
+	_scale = scale
 	var width := win_size.x / scale
 	var phone := width < 640.0
 	var pad := 12 if phone else 32
@@ -272,8 +280,12 @@ func _layout() -> void:
 	nav.add_theme_constant_override("separation", 0 if phone else 4)
 	header.get_child(0).add_theme_constant_override("separation", 12 if phone else 28)
 	header.find_child("Title", true, false).visible = not phone
+	# Phones: the tabs share the row evenly, with less padding.
+	nav.size_flags_horizontal = Control.SIZE_EXPAND_FILL if phone else Control.SIZE_FILL
 	for t in tabs.values():
-		var st := Ui.box(Ui.CLEAR, 0, Ui.CLEAR, 0, 10 if phone else 16, 10)
+		t.size_flags_horizontal = Control.SIZE_EXPAND_FILL if phone else Control.SIZE_FILL
+		t.add_theme_font_size_override("font_size", 14 if phone else 15)
+		var st := Ui.box(Ui.CLEAR, 0, Ui.CLEAR, 0, 6 if phone else 16, 10)
 		t.add_theme_stylebox_override("normal", st)
 		t.add_theme_stylebox_override("hover", st)
 		var on := st.duplicate() as StyleBoxFlat
@@ -285,6 +297,27 @@ func _layout() -> void:
 	line_page.set_narrow(narrow, phone)
 	cast_page.set_narrow(width < 980.0, phone)
 	vocabulary_page.set_narrow(width < 980.0, phone)
+	_fit()
+
+
+func _fit_soon() -> void:
+	if not _fitting:
+		_fitting = true
+		_fit.call_deferred()
+
+
+## If the page is still wider than the screen, zooms out just enough to fit,
+## so nothing is cut off on the right.
+func _fit() -> void:
+	_fitting = false
+	var win := get_window()
+	var win_size := test_size if test_size != Vector2i.ZERO else win.size
+	var width := win_size.x / _scale
+	var need := margin.get_combined_minimum_size().x
+	var shrink := clampf(width / need, 0.7, 1.0) if need > width else 1.0
+	var want := Vector2i(Vector2(win_size) / (_scale * shrink))
+	if win.content_scale_size != want:
+		win.content_scale_size = want
 
 
 # --- Characters ----------------------------------------------------------------
@@ -483,6 +516,7 @@ func _build_export() -> void:
 	code.add_theme_font_override("font", Ui.FONT_MONO)
 	gv.add_child(code)
 	export_font_check = CheckButton.new()
+	export_font_check.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	export_font_check.button_pressed = true
 	gv.add_child(export_font_check)
 	gv.add_child(Ui.button("Save line file" if not BlabberWeb.available() else "Download line file", _export_line, "export", "Primary"))

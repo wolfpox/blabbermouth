@@ -142,6 +142,7 @@ func set_narrow(narrow: bool, phone := false) -> void:
 	var right: Control = editor.get_parent()
 	right.custom_minimum_size.x = 0 if narrow else 380
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL if narrow else Control.SIZE_FILL
+	right.add_theme_stylebox_override("panel", Ui.box(Ui.PANEL, 20 if phone else 28, Ui.CLEAR, 0, 18 if phone else 24, 24))
 
 
 func show_cast(p_members: Array, p_current: int) -> void:

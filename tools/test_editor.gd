@@ -23,6 +23,7 @@ func _init() -> void:
 	_test_cast()
 	await _test_screen()
 	await _test_vocabulary_screen()
+	await _test_touch()
 	print("editor tests: ", "all passed" if failures == 0 else "%d failed" % failures)
 	quit(1 if failures > 0 else 0)
 
@@ -423,3 +424,71 @@ func _clear_editor_files(save: String) -> void:
 		for f in DirAccess.get_files_at(Cast.sets_dir(save)):
 			DirAccess.remove_absolute(Cast.sets_dir(save).path_join(f))
 		DirAccess.remove_absolute(Cast.sets_dir(save))
+
+
+## A finger drags the page from anywhere; taps still press things.
+func _test_touch() -> void:
+	var save := "user://editor_test_touch.json"
+	DirAccess.remove_absolute(save)
+	var scene: Control = (load("res://demo/demo.tscn") as PackedScene).instantiate()
+	scene.save_path = save
+	scene.test_size = Vector2i(390, 844)
+	root.add_child(scene)
+	for i in 4:
+		await process_frame
+	var page = scene.line_page
+	page.load_source("Hello there, traveler!")
+	for i in 3:
+		await process_frame
+	var chip: Control = page.chips["wave"]
+	var at := chip.get_global_rect().get_center()
+	scene.scroll.scroll_vertical = 0
+	# Drag up from a chip: the page scrolls and the chip isn't pressed.
+	await _touch(at, at + Vector2(0, -150))
+	check(scene.scroll.scroll_vertical > 100, "dragging over a chip scrolls the page (%d)" % scene.scroll.scroll_vertical)
+	check(page.model.to_source() == "Hello there, traveler!", "a drag doesn't press the chip: " + page.model.to_source())
+	# Let go mid-drag and it glides on, then settles.
+	var last := -1
+	for i in 600:
+		if scene.scroll.scroll_vertical == last:
+			break
+		last = scene.scroll.scroll_vertical
+		await create_timer(0.03).timeout
+	scene.scroll.scroll_vertical = 0
+	await process_frame
+	# A tap still presses it.
+	await _touch(at, at)
+	check(page.model.to_source() == "[wave]Hello there, traveler![/wave]", "a tap presses the chip: " + page.model.to_source())
+	check(scene.scroll.scroll_vertical == 0, "a tap doesn't scroll")
+	# A sideways drag goes to what's under the finger, and doesn't scroll.
+	await _touch(at, at + Vector2(60, 4))
+	check(scene.scroll.scroll_vertical == 0, "a sideways drag doesn't scroll")
+	scene.queue_free()
+	await process_frame
+	DirAccess.remove_absolute(save)
+
+
+## Presses at a canvas point, moves to another in steps, and lets go.
+func _touch(from: Vector2, to: Vector2) -> void:
+	var xf := root.get_final_transform()
+	var steps := 6 if from != to else 0
+	var t := InputEventScreenTouch.new()
+	t.pressed = true
+	t.position = xf * from
+	Input.parse_input_event(t)
+	Input.flush_buffered_events()
+	await process_frame
+	for i in steps:
+		var d := InputEventScreenDrag.new()
+		d.position = xf * from.lerp(to, float(i + 1) / steps)
+		d.relative = xf.basis_xform((to - from) / steps)
+		Input.parse_input_event(d)
+		Input.flush_buffered_events()
+		await process_frame
+	var up := InputEventScreenTouch.new()
+	up.pressed = false
+	up.position = xf * to
+	Input.parse_input_event(up)
+	Input.flush_buffered_events()
+	await process_frame
+	await process_frame
