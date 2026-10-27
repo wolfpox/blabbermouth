@@ -148,6 +148,9 @@ func set_narrow(narrow: bool, phone := false) -> void:
 	play_button.custom_minimum_size.x = 0 if phone else 170
 	play_button.add_theme_stylebox_override("normal", Ui.box(Ui.ACCENT, 16, Ui.CLEAR, 0, 18 if phone else 26, 14))
 	bars.custom_minimum_size.x = 40 if phone else 80
+	# The voice source switch is the widest thing here, so phones skip its icons.
+	synth_button.icon = null if phone else Ui.icon("synth")
+	rec_button.icon = null if phone else Ui.icon("mic")
 	_fit_bubble()
 
 
@@ -465,25 +468,18 @@ func _mark_row(m: Dictionary) -> Control:
 	flow.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(flow)
 	var t := Ui.label("“%s”" % _short(model.text.substr(m.start, m.end - m.start), 34), 15, Ui.TEXT, true)
-	t.autowrap_mode = TextServer.AUTOWRAP_OFF
-	t.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_wrap_in_row(t)
 	flow.add_child(t)
-	var chips_row := Ui.hbox(6)
-	chips_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	chips_row.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	# The chips flow after the words, onto more lines when there are many.
 	var voices: Array = []
 	for fx in m.fx:
-		chips_row.add_child(_tag_chip(LineModel.FX[fx].label))
+		flow.add_child(_tag_chip(LineModel.FX[fx].label))
 		voices.append(LineModel.FX[fx].voice)
 	if m.pause > 0.0:
-		chips_row.add_child(_tag_chip("Pause %ss" % str(snappedf(m.pause, 0.01)).trim_suffix(".0")))
+		flow.add_child(_tag_chip("Pause %ss" % str(snappedf(m.pause, 0.01)).trim_suffix(".0")))
 		voices.append("then silence")
-	flow.add_child(chips_row)
 	var d := Ui.label(" + ".join(voices), 14, Ui.DIM)
-	d.autowrap_mode = TextServer.AUTOWRAP_OFF
-	d.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	d.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_wrap_in_row(d)
 	flow.add_child(d)
 	row.pressed.connect(func() -> void: select_range(Vector2i(m.start, m.end)))
 	return row
@@ -501,9 +497,7 @@ func _recorded_row(r: Dictionary) -> Control:
 	flow.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(flow)
 	var t := Ui.label("“%s”" % _short(model.text.substr(r.start, r.end - r.start), 34), 15, Ui.TEXT, true)
-	t.autowrap_mode = TextServer.AUTOWRAP_OFF
-	t.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_wrap_in_row(t)
 	flow.add_child(t)
 	var chip := _tag_chip("Recorded")
 	chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -516,12 +510,20 @@ func _recorded_row(r: Dictionary) -> Control:
 	if member.sets.size() > 1:
 		parts.append("from %s" % vs.resource_name)
 	var d := Ui.label(" · ".join(parts), 14, Ui.DIM)
-	d.autowrap_mode = TextServer.AUTOWRAP_OFF
-	d.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	d.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_wrap_in_row(d)
 	flow.add_child(d)
 	row.pressed.connect(func() -> void: select_range(Vector2i(r.start, r.end)))
 	return row
+
+
+## Text in a row wraps instead of widening the page: it sits beside the chips
+## when there's room, or takes a line of its own.
+func _wrap_in_row(l: Label) -> void:
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size.x = 140
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
 func _tag_chip(text: String) -> Control:
@@ -532,6 +534,7 @@ func _tag_chip(text: String) -> Control:
 	l.autowrap_mode = TextServer.AUTOWRAP_OFF
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	p.add_child(l)
+	p.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	return p
 
 

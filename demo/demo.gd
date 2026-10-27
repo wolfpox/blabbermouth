@@ -179,6 +179,7 @@ func _ready() -> void:
 		save_soon()
 	show_page("line")
 	get_window().size_changed.connect(_layout)
+	scroll.minimum_size_changed.connect(_fit_soon)
 	margin.minimum_size_changed.connect(_fit_soon)
 	get_window().files_dropped.connect(_on_files_dropped)
 	_layout.call_deferred()
@@ -265,7 +266,8 @@ func _layout() -> void:
 		scale = maxf(scale, DisplayServer.screen_get_dpi() / 160.0)
 	scale = clampf(scale, 1.0, 3.0)
 	win.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
-	win.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
+	# Tests: exactly test_size, whatever the real (headless) window is.
+	win.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND if test_size == Vector2i.ZERO else Window.CONTENT_SCALE_ASPECT_IGNORE
 	var win_size := test_size if test_size != Vector2i.ZERO else win.size
 	_scale = scale
 	var width := win_size.x / scale
@@ -313,7 +315,8 @@ func _fit() -> void:
 	var win := get_window()
 	var win_size := test_size if test_size != Vector2i.ZERO else win.size
 	var width := win_size.x / _scale
-	var need := margin.get_combined_minimum_size().x
+	# The scroll area's own minimum includes its scrollbar.
+	var need := scroll.get_combined_minimum_size().x
 	var shrink := clampf(width / need, 0.7, 1.0) if need > width else 1.0
 	var want := Vector2i(Vector2(win_size) / (_scale * shrink))
 	if win.content_scale_size != want:

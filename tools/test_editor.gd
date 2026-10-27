@@ -432,7 +432,7 @@ func _test_touch() -> void:
 	DirAccess.remove_absolute(save)
 	var scene: Control = (load("res://demo/demo.tscn") as PackedScene).instantiate()
 	scene.save_path = save
-	scene.test_size = Vector2i(390, 844)
+	scene.test_size = Vector2i(360, 780)
 	root.add_child(scene)
 	for i in 4:
 		await process_frame
@@ -463,6 +463,26 @@ func _test_touch() -> void:
 	# A sideways drag goes to what's under the finger, and doesn't scroll.
 	await _touch(at, at + Vector2(60, 4))
 	check(scene.scroll.scroll_vertical == 0, "a sideways drag doesn't scroll")
+	# Everything fits a 360 px phone, even with effects piled on long text.
+	for i in scene.members.size():
+		if scene.members[i].speaker.display_name == "UNIT-7":
+			scene.set_current(i)
+	page.load_source("W-what was that noise?[pause=0.5] Probably nothing. Probably.")
+	for fx in ["shout", "wave", "slow", "high"]:
+		page.select_range(Vector2i(0, 9999))
+		page.chips[fx].pressed.emit()
+	page._toggle_pause()
+	page.select_range(Vector2i(23, 50))
+	for i in 3:
+		await process_frame
+	var need: float = scene.scroll.get_combined_minimum_size().x
+	check(need <= 360.0, "the line page fits a phone with effects piled on (%d px)" % need)
+	for p in ["cast", "vocabulary", "voices"]:
+		scene.show_page(p)
+		await process_frame
+		need = scene.scroll.get_combined_minimum_size().x
+		check(need <= 360.0, "the %s page fits a phone (%d px)" % [p, need])
+	scene.show_page("line")
 	scene.queue_free()
 	await process_frame
 	DirAccess.remove_absolute(save)
